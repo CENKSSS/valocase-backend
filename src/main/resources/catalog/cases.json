@@ -1,0 +1,297 @@
+{
+    "version": 1,
+    "cases": [
+        {
+            "caseId": "vandal_basic",
+            "displayName": "Basic Vandal Case",
+            "price": 500,
+            "resourceKey": "Art/Cases/Basic_Vandal_Case",
+            "enabled": true,
+            "themeColor": "#66B2FF",
+            "rarityWeights": [
+                {
+                    "rarity": "Select",
+                    "weight": 65.0
+                },
+                {
+                    "rarity": "Deluxe",
+                    "weight": 15.0
+                },
+                {
+                    "rarity": "Premium",
+                    "weight": 10.0
+                },
+                {
+                    "rarity": "Exclusive",
+                    "weight": 7.0
+                },
+                {
+                    "rarity": "Ultra",
+                    "weight": 3.0
+                }
+            ],
+            "manualDropPool": [
+                "skin_champions_2021_vandal_vandal",
+                "skin_dolmir_in_İntikamı_vandal_vandal",
+                "skin_sırçiçeği_vandal_vandal",
+                "skin_evrim_vandal_vandal",
+                "skin_albeni_vandal_vandal",
+                "skin_gösterİşlİ_vandal_vandal",
+                "skin_prizma_ii_vandal_vandal",
+                "skin_ulupençe_vandal_vandal",
+                "skin_güneş_akını_vandal_vandal",
+                "skin_soğuk_çelik_vandal_vandal",
+                "skin_gaia_nın_İntikamı_vandal_vandal",
+                "skin_faz_koruyucu_vandal_vandal",
+                "skin_ktak_vandal_vandal",
+                "skin_altin_afet_vandal_vandal",
+                "skin_tork_vandal_vandal",
+                "skin_sakura_vandal_vandal",
+                "skin_yüksek_İrtifa_vandal_vandal",
+                "skin_devinim_vandal_vandal",
+                "skin_9_canlı_ares_ares"
+            ]
+        },
+        {
+            "caseId": "vandal_tactical",
+            "displayName": "Tactical Vandal Case",
+            "price": 1000,
+            "resourceKey": "Art/Cases/Tactical_Vandal_Case",
+            "enabled": true,
+            "themeColor": "#33CC66",
+            "rarityWeights": [
+                {
+                    "rarity": "Select",
+                    "weight": 40.0
+                },
+                {
+                    "rarity": "Deluxe",
+                    "weight": 30.0
+                },
+                {
+                    "rarity": "Premium",
+                    "weight": 15.0
+                },
+                {
+                    "rarity": "Exclusive",
+                    "weight": 10.0
+                },
+                {
+                    "rarity": "Ultra",
+                    "weight": 5.0
+                }
+            ],
+            "manualDropPool": [
+                "skin_arcane_vandal_vandal",
+                "skin_anomali_vandal_vandal",
+                "skin_işık_muhafızları_vandal_vandal",
+                "skin_ejderin_buyruğu_vandal_vandal",
+                "skin_ebedi_vandal_vandal",
+                "skin_yıldız_serüveni_vandal_vandal",
+                "skin_büyülü_boynuz_vandal_vandal",
+                "skin_İyon_vandal_vandal",
+                "skin_karaborsa_vandal_vandal",
+                "skin_sihirpunk_vandal_vandal",
+                "skin_onetap_ten_ora_vandal_vandal",
+                "skin_arİstokrat_vandal_vandal",
+                "skin_kiş_harİkasi_vandal_vandal",
+                "skin_hız_tutkunu_vandal_vandal",
+                "skin_ay_tavşanı_vandal_vandal",
+                "skin_sermet_vandal_vandal",
+                "skin_atlas_kmt_vandal_vandal"
+            ]
+        },
+        {
+            "caseId": "vandal_elite",
+            "displayName": "Elite Vandal Case",
+            "price": 2000,
+            "resourceKey": "Art/Cases/Elite_Vandal_Case",
+            "enabled": true,
+            "themeColor": "#FF8C1A",
+            "rarityWeights": [
+                {
+                    "rarity": "Select",
+                    "weight": 20.0
+                },
+                {
+                    "rarity": "Deluxe",
+                    "weight": 35.0
+                },
+                {
+                    "rarity": "Premium",
+                    "weight": 25.0
+                },
+                {
+                    "rarity": "Exclusive",
+                    "weight": 15.0
+                },
+                {
+                    "rarity": "Ultra",
+                    "weight": 5.0
+                }
+            ],
+            "manualDropPool": [
+                "skin_ex_o_vandal_vandal",
+                "skin_champions_2025_vandal_vandal",
+                "skin_kaosun_başlangıcı_vandal_vandal",
+                "skin_yıldız_belası_vandal_vandal",
+                "skin_canavarlar_şehri_vandal_vandal",
+                "skin_ufkun_sınırı_vandal_vandal",
+                "skin_vahşiçene_vandal_vandal",
+                "skin_aemondir_vandal_vandal",
+                "skin_kızıl_musibet_vandal_vandal",
+                "skin_köken_vandal_vandal",
+                "skin_ejder_ateşi_vandal_vandal",
+                "skin_unutulmaz_vandal_vandal",
+                "skin_mk_vii_İstiklal_vandal_vandal",
+                "skin_kum_fırtınası_vandal_vandal",
+                "skin_vİran_vandal_vandal",
+                "skin_gümüş_avcı_vandal_vandal",
+                "skin_elysium_un_anahtarları_vandal_vandal"
+            ]
+        },
+        {
+            "caseId": "vandal_protocol",
+            "displayName": "Protocol Vandal Case",
+            "price": 3500,
+            "resourceKey": "Art/Cases/Protocol_Vandal_Case",
+            "enabled": true,
+            "themeColor": "#B233FF",
+            "rarityWeights": [
+                {
+                    "rarity": "Select",
+                    "weight": 10.0
+                },
+                {
+                    "rarity": "Deluxe",
+                    "weight": 20.0
+                },
+                {
+                    "rarity": "Premium",
+                    "weight": 35.0
+                },
+                {
+                    "rarity": "Exclusive",
+                    "weight": 25.0
+                },
+                {
+                    "rarity": "Ultra",
+                    "weight": 10.0
+                }
+            ],
+            "manualDropPool": [
+                "skin_felaketin_kalbi_vandal_vandal",
+                "skin_kuronami_vandal_vandal",
+                "skin_zamanın_ötesi_vandal_vandal",
+                "skin_karaçalı_vandal_vandal",
+                "skin_şematik_vandal_vandal",
+                "skin_flaş_vandal_vandal",
+                "skin_ego_vandal_vandal",
+                "skin_cesur_yürek_vandal_vandal",
+                "skin_neptün_vandal_vandal",
+                "skin_evori_rüyakanatlar_vandal_vandal",
+                "skin_takımın_ası_vandal_vandal",
+                "skin_ecelin_isırığı_vandal_vandal",
+                "skin_kuyrukluyıldız_vandal_vandal",
+                "skin_holomoku_vandal_vandal",
+                "skin_ufuk_vandal_vandal",
+                "skin_orion_vandal_vandal"
+            ]
+        },
+        {
+            "caseId": "vandal_radiant",
+            "displayName": "Radiant Vandal Case",
+            "price": 5000,
+            "resourceKey": "Art/Cases/Radiant_Vandal_Case",
+            "enabled": true,
+            "themeColor": "#FFCC1A",
+            "rarityWeights": [
+                {
+                    "rarity": "Select",
+                    "weight": 5.0
+                },
+                {
+                    "rarity": "Deluxe",
+                    "weight": 10.0
+                },
+                {
+                    "rarity": "Premium",
+                    "weight": 25.0
+                },
+                {
+                    "rarity": "Exclusive",
+                    "weight": 35.0
+                },
+                {
+                    "rarity": "Ultra",
+                    "weight": 25.0
+                }
+            ],
+            "manualDropPool": [
+                "skin_delipop_vandal_vandal",
+                "skin_champions_2023_vandal_vandal",
+                "skin_cyrax_vandal_vandal",
+                "skin_holo_meridyen_vandal_vandal",
+                "skin_sualti_vandal_vandal",
+                "skin_süper_set_vandal_vandal",
+                "skin_çapraşik_âlemler_vandal_vandal",
+                "skin_valorant_go_2_cilt_vandal_vandal",
+                "skin_yitik_vandal_vandal",
+                "skin_ejder_ateşi_vandal_vandal",
+                "skin_himaye_vandal_vandal",
+                "skin_buzul_vandal_vandal",
+                "skin_demirdiken_vandal_vandal",
+                "skin_kalp_durduran_vandal_vandal",
+                "skin_silvanus_vandal_vandal",
+                "skin_minima_vandal_vandal"
+            ]
+        },
+        {
+            "caseId": "vandal_arcane",
+            "displayName": "Arcane Vandal Case",
+            "price": 7000,
+            "resourceKey": "Art/Cases/Arcane_Vandal_Case",
+            "enabled": true,
+            "themeColor": "#8C0DCC",
+            "rarityWeights": [
+                {
+                    "rarity": "Select",
+                    "weight": 2.0
+                },
+                {
+                    "rarity": "Deluxe",
+                    "weight": 5.0
+                },
+                {
+                    "rarity": "Premium",
+                    "weight": 18.0
+                },
+                {
+                    "rarity": "Exclusive",
+                    "weight": 35.0
+                },
+                {
+                    "rarity": "Ultra",
+                    "weight": 40.0
+                }
+            ],
+            "manualDropPool": [
+                "skin_splashx_vandal_vandal",
+                "skin_rgx_11z_pro_vandal_vandal",
+                "skin_sürat_canavarı_vandal_vandal",
+                "skin_nitro_vandal_vandal",
+                "skin_şenlİk_vandal_vandal",
+                "skin_asil_vandal_vandal",
+                "skin_oni_vandal_vandal",
+                "skin_yağmaci_vandal_vandal",
+                "skin_evori_rüyakanatlar_vandal_vandal",
+                "skin_popstar_vandal_vandal",
+                "skin_İpek_yaprak_vandal_vandal",
+                "skin_kolektİf_vandal_vandal",
+                "skin_doludİzgİn_vandal_vandal",
+                "skin_süvari_vandal_vandal",
+                "skin_hızlı_tempo_vandal_vandal"
+            ]
+        }
+    ]
+}
