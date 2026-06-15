@@ -38,9 +38,15 @@ SPRING_PROFILES_ACTIVE=prod java -jar valocase-backend.jar
 
 ### Required environment variables (prod)
 
-- `DATABASE_URL` — JDBC URL, e.g. `jdbc:postgresql://db-host:5432/valocase_db`
-- `DATABASE_USERNAME` — database user
-- `DATABASE_PASSWORD` — database password
+- `DATABASE_URL` — Railway's database URL. It is libpq-style
+  (`postgresql://user:pass@host:5432/db`), which is **not** a valid JDBC URL.
+  `RailwayDatabaseUrlPostProcessor` rewrites it to `jdbc:postgresql://host:5432/db`
+  at startup, so you can paste Railway's value as-is (e.g. `${{Postgres.DATABASE_URL}}`).
+- `DATABASE_USERNAME` — database user (e.g. `${{Postgres.PGUSER}}`).
+- `DATABASE_PASSWORD` — database password (e.g. `${{Postgres.PGPASSWORD}}`).
+
+The separate `PGHOST` / `PGPORT` / `PGDATABASE` / `PGUSER` / `PGPASSWORD`
+variables are no longer needed.
 
 ### Optional environment variables
 
