@@ -901,5 +901,1518 @@
       "resourceKey": "Art/Skins/Vandal/depths",
       "enabled": true
     }
+    ,
+    {
+      "skinId": "skin_melee_power_fist",
+      "displayName": "Power Fist",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 5950,
+      "resourceKey": "Art/Skins/Melee/power_fist",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_araxys_bio_atomizers",
+      "displayName": "Araxys Bio-Atomizers",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 5350,
+      "resourceKey": "Art/Skins/Melee/araxys_bio_atomizers",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_waveform",
+      "displayName": "Waveform",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 5350,
+      "resourceKey": "Art/Skins/Melee/waveform",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_phaseguard_splitter",
+      "displayName": "Phaseguard Splitter",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 5350,
+      "resourceKey": "Art/Skins/Melee/phaseguard_splitter",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_nocturnum_scythe",
+      "displayName": "Nocturnum Scythe",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 5350,
+      "resourceKey": "Art/Skins/Melee/nocturnum_scythe",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_ex_o_edge",
+      "displayName": "EX.O Edge",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 5350,
+      "resourceKey": "Art/Skins/Melee/ex_o_edge",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_kuronami_no_yaiba",
+      "displayName": "Kuronami no Yaiba",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 5350,
+      "resourceKey": "Art/Skins/Melee/kuronami_no_yaiba",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_kuronami_naru_kami",
+      "displayName": "Kuronami Naru-Kami",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 5350,
+      "resourceKey": "Art/Skins/Melee/kuronami_naru_kami",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_onimaru_kunitsuna",
+      "displayName": "Onimaru Kunitsuna",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 5350,
+      "resourceKey": "Art/Skins/Melee/onimaru_kunitsuna",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_reaver_butterfly",
+      "displayName": "Reaver Butterfly",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 5350,
+      "resourceKey": "Art/Skins/Melee/reaver_butterfly",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_cyrax_fanblade",
+      "displayName": "CYRAX Fanblade",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 5350,
+      "resourceKey": "Art/Skins/Melee/cyrax_fanblade",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_kogitsune",
+      "displayName": "Kogitsune",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 5350,
+      "resourceKey": "Art/Skins/Melee/kogitsune",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_elderflame_dagger",
+      "displayName": "Elderflame Dagger",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4950,
+      "resourceKey": "Art/Skins/Melee/elderflame_dagger",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_ora_by_onetap",
+      "displayName": "ORA by OneTap",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4950,
+      "resourceKey": "Art/Skins/Melee/ora_by_onetap",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_personal_administrative_melee_unit",
+      "displayName": "Personal Administrative Melee Unit",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4950,
+      "resourceKey": "Art/Skins/Melee/personal_administrative_melee_unit",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_evori_s_spellcaster",
+      "displayName": "Evori's Spellcaster",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4950,
+      "resourceKey": "Art/Skins/Melee/evori_s_spellcaster",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_rgx_11z_pro_blade",
+      "displayName": "RGX 11z Pro Blade",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/rgx_11z_pro_blade",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_rgx_11z_pro_firefly",
+      "displayName": "RGX 11z Pro Firefly",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/rgx_11z_pro_firefly",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_rgx_11z_pro_karambit",
+      "displayName": "RGX 11z Pro Karambit",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/rgx_11z_pro_karambit",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_divergence_staff",
+      "displayName": "Divergence Staff",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/divergence_staff",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_araxys_bio_harvester",
+      "displayName": "Araxys Bio Harvester",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/araxys_bio_harvester",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_bolt",
+      "displayName": "Bolt",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/bolt",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_doombringer_battleaxe",
+      "displayName": "Doombringer Battleaxe",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/doombringer_battleaxe",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_glitchpop_dagger",
+      "displayName": "Glitchpop Dagger",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/glitchpop_dagger",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_glitchpop_axe",
+      "displayName": "Glitchpop Axe",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/glitchpop_axe",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_terminus_a_quo",
+      "displayName": "Terminus A Quo",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/terminus_a_quo",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_blade_of_chaos",
+      "displayName": "Blade of Chaos",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/blade_of_chaos",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_flail_of_chaos",
+      "displayName": "Flail of Chaos",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/flail_of_chaos",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_blades_of_imperium",
+      "displayName": "Blades of Imperium",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/blades_of_imperium",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_singularity",
+      "displayName": "Singularity",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/singularity",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_singularity_butterfly",
+      "displayName": "Singularity Butterfly",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/singularity_butterfly",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_dolmir_s_judgement",
+      "displayName": "Dolmir's Judgement",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/dolmir_s_judgement",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_neo_frontier_axe",
+      "displayName": "Neo Frontier Axe",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/neo_frontier_axe",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_bubblegum_deathwish_chainsaw",
+      "displayName": "Bubblegum Deathwish Chainsaw",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/bubblegum_deathwish_chainsaw",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_blades_of_primordia",
+      "displayName": "Blades of Primordia",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/blades_of_primordia",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_xerfang",
+      "displayName": "XERØFANG",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/xerfang",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_broken_blade_of_the_ruined_king",
+      "displayName": "Broken Blade of the Ruined King",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/broken_blade_of_the_ruined_king",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_magepunk_sparkswitch",
+      "displayName": "Magepunk Sparkswitch",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/magepunk_sparkswitch",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_ruyi_staff",
+      "displayName": "Ruyi Staff",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/ruyi_staff",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_overdrive_blade",
+      "displayName": "Overdrive Blade",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/overdrive_blade",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_ion_karambit",
+      "displayName": "Ion Karambit",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/ion_karambit",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_rogue_push_daggers",
+      "displayName": "Rogue Push Daggers",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/rogue_push_daggers",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_blackthorn_blades",
+      "displayName": "Blackthorn Blades",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/blackthorn_blades",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_holoflare",
+      "displayName": "Holoflare",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/holoflare",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_helix_daggers",
+      "displayName": "Helix Daggers",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/helix_daggers",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_relic_of_the_sentinel",
+      "displayName": "Relic of the Sentinel",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/relic_of_the_sentinel",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_relic_stone_daggers",
+      "displayName": "Relic Stone Daggers",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/relic_stone_daggers",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_reaver_karambit",
+      "displayName": "Reaver Karambit",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/reaver_karambit",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_eternal_sovereign",
+      "displayName": "Eternal Sovereign",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/eternal_sovereign",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_mystbloom_kunai",
+      "displayName": "Mystbloom Kunai",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/mystbloom_kunai",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_mystbloom_fanblade",
+      "displayName": "Mystbloom Fanblade",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/mystbloom_fanblade",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_blastx_polymer_knifetech_coated",
+      "displayName": "BlastX Polymer KnifeTech Coated",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/blastx_polymer_knifetech_coated",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_splashx_gloves",
+      "displayName": "SplashX Gloves",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/splashx_gloves",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_xenohunter",
+      "displayName": "Xenohunter",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/xenohunter",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_valorant_go_vol_1",
+      "displayName": "VALORANT GO! Vol. 1",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/valorant_go_vol_1",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_yoru_s_stylish_butterfly_comb",
+      "displayName": "Yoru's Stylish Butterfly Comb",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/yoru_s_stylish_butterfly_comb",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_neptune_anchor",
+      "displayName": "Neptune Anchor",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/neptune_anchor",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_neptune_hook",
+      "displayName": "Neptune Hook",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/neptune_hook",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_gaia_s_wrath",
+      "displayName": "Gaia's Wrath",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/gaia_s_wrath",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_gaia_s_fury",
+      "displayName": "Gaia's Fury",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/gaia_s_fury",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_origin_crescent_blade",
+      "displayName": "Origin Crescent Blade",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/origin_crescent_blade",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_radiant_crisis_001_baseball_bat",
+      "displayName": "Radiant Crisis 001 Baseball Bat",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/radiant_crisis_001_baseball_bat",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_nebula",
+      "displayName": "Nebula",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/nebula",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_hack",
+      "displayName": "Hack",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/hack",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_forsaken_ritual_blade",
+      "displayName": "Forsaken Ritual Blade",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/forsaken_ritual_blade",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_soulstrife_scythe",
+      "displayName": "Soulstrife Scythe",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/soulstrife_scythe",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_prime_axe",
+      "displayName": "Prime Axe",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/prime_axe",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_prime_2_0_karambit",
+      "displayName": "Prime//2.0 Karambit",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/prime_2_0_karambit",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_black_market_butterfly",
+      "displayName": "Black.Market Butterfly",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/black_market_butterfly",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_blade_of_aemondir",
+      "displayName": "Blade of Aemondir",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/blade_of_aemondir",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_solarstride_flamethrower",
+      "displayName": "Solarstride Flamethrower",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/solarstride_flamethrower",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_celestial_fan",
+      "displayName": "Celestial Fan",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/celestial_fan",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_magepunk_electroblade",
+      "displayName": "Magepunk Electroblade",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/magepunk_electroblade",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_magepunk_shock_gauntlet",
+      "displayName": "Magepunk Shock Gauntlet",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/magepunk_shock_gauntlet",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_spline_dagger",
+      "displayName": "Spline Dagger",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/spline_dagger",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_minima_karambit",
+      "displayName": "Minima Karambit",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/minima_karambit",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_crimsonbeast_hammer",
+      "displayName": "Crimsonbeast Hammer",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/crimsonbeast_hammer",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_ion_energy_sword",
+      "displayName": "Ion Energy Sword",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/ion_energy_sword",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_oni_claw",
+      "displayName": "Oni Claw",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/oni_claw",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_cryostasis_impact_drill",
+      "displayName": "Cryostasis Impact Drill",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/cryostasis_impact_drill",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_luna_s_descent",
+      "displayName": "Luna's Descent",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/luna_s_descent",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_gravitational_uranium_neuroblaster_baton",
+      "displayName": "Gravitational Uranium Neuroblaster Baton",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/gravitational_uranium_neuroblaster_baton",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_reaver",
+      "displayName": "Reaver",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/reaver",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_sovereign_sword",
+      "displayName": "Sovereign Sword",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/sovereign_sword",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_prosperity",
+      "displayName": "Prosperity",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/prosperity",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_recon_balisong",
+      "displayName": "Recon Balisong",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/recon_balisong",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_wonderstallion_hammer",
+      "displayName": "Wonderstallion Hammer",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/wonderstallion_hammer",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_ego",
+      "displayName": "Ego",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 3550,
+      "resourceKey": "Art/Skins/Melee/ego",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_altitude_knuckle",
+      "displayName": "Altitude Knuckle",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 2550,
+      "resourceKey": "Art/Skins/Melee/altitude_knuckle",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_valorant_go_vol_3_dagger",
+      "displayName": "VALORANT GO! Vol. 3 Dagger",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 2550,
+      "resourceKey": "Art/Skins/Melee/valorant_go_vol_3_dagger",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_mk_vii_liberty_combat",
+      "displayName": "MK.VII Liberty Combat",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 2550,
+      "resourceKey": "Art/Skins/Melee/mk_vii_liberty_combat",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_aperture_stiletto",
+      "displayName": "Aperture Stiletto",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 2550,
+      "resourceKey": "Art/Skins/Melee/aperture_stiletto",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_emberclad_hammer",
+      "displayName": "Emberclad Hammer",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 2550,
+      "resourceKey": "Art/Skins/Melee/emberclad_hammer",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_caeruleus",
+      "displayName": "Caeruleus",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 2550,
+      "resourceKey": "Art/Skins/Melee/caeruleus",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_nanomight_knuckles",
+      "displayName": "Nanomight Knuckles",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 2550,
+      "resourceKey": "Art/Skins/Melee/nanomight_knuckles",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_blade_of_serket",
+      "displayName": "Blade of Serket",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 2550,
+      "resourceKey": "Art/Skins/Melee/blade_of_serket",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_chromedek_gauntlet",
+      "displayName": "Chromedek Gauntlet",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 2550,
+      "resourceKey": "Art/Skins/Melee/chromedek_gauntlet",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_jellybeam_sugarslice",
+      "displayName": "Jellybeam Sugarslice",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 2550,
+      "resourceKey": "Art/Skins/Melee/jellybeam_sugarslice",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_prism",
+      "displayName": "Prism",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 2550,
+      "resourceKey": "Art/Skins/Melee/prism",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_equilibrium",
+      "displayName": "Equilibrium",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 2550,
+      "resourceKey": "Art/Skins/Melee/equilibrium",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_catrina",
+      "displayName": "Catrina",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 2550,
+      "resourceKey": "Art/Skins/Melee/catrina",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_combat_crafts_axe",
+      "displayName": "Combat Crafts Axe",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 2550,
+      "resourceKey": "Art/Skins/Melee/combat_crafts_axe",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_silkleaf_fan",
+      "displayName": "SilkLeaf Fan",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 2550,
+      "resourceKey": "Art/Skins/Melee/silkleaf_fan",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_orion_sword",
+      "displayName": "Orion Sword",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 2550,
+      "resourceKey": "Art/Skins/Melee/orion_sword",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_snowfall_wand",
+      "displayName": "Snowfall Wand",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 2550,
+      "resourceKey": "Art/Skins/Melee/snowfall_wand",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_titanmail_mace",
+      "displayName": "Titanmail Mace",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 2550,
+      "resourceKey": "Art/Skins/Melee/titanmail_mace",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_hu_else",
+      "displayName": "Hu Else",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 2550,
+      "resourceKey": "Art/Skins/Melee/hu_else",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_no_limits_bat",
+      "displayName": "NO LIMITS Bat",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 2550,
+      "resourceKey": "Art/Skins/Melee/no_limits_bat",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_kaimana",
+      "displayName": "Kaimana",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 2550,
+      "resourceKey": "Art/Skins/Melee/kaimana",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_wasteland_crowbar",
+      "displayName": "Wasteland Crowbar",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 2550,
+      "resourceKey": "Art/Skins/Melee/wasteland_crowbar",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_winterwunderland_candy_cane",
+      "displayName": "Winterwunderland Candy Cane",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 2550,
+      "resourceKey": "Art/Skins/Melee/winterwunderland_candy_cane",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_intergrade_blade",
+      "displayName": "Intergrade Blade",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/intergrade_blade",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_smite",
+      "displayName": "Smite",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/smite",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_smite_hammer",
+      "displayName": "Smite Hammer",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/smite_hammer",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_daydreams_crowbar",
+      "displayName": "Daydreams Crowbar",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/daydreams_crowbar",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_luxe",
+      "displayName": "Luxe",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/luxe",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_switchback_ascender",
+      "displayName": "Switchback Ascender",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/switchback_ascender",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_reverie_sword",
+      "displayName": "Reverie Sword",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/reverie_sword",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_fortune_s_scepter",
+      "displayName": "Fortune's Scepter",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/fortune_s_scepter",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_storm_maw_axe",
+      "displayName": "Storm Maw Axe",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/storm_maw_axe",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_task_force_809",
+      "displayName": "Task Force 809",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/task_force_809",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_champions_2021_karambit",
+      "displayName": "Champions 2021 Karambit",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 5350,
+      "resourceKey": "Art/Skins/Melee/champions_2021_karambit",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_champions_2022_butterfly",
+      "displayName": "Champions 2022 Butterfly",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 5350,
+      "resourceKey": "Art/Skins/Melee/champions_2022_butterfly",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_champions_2023_kunai",
+      "displayName": "Champions 2023 Kunai",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 5350,
+      "resourceKey": "Art/Skins/Melee/champions_2023_kunai",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_champions_2024_blade",
+      "displayName": "Champions 2024 Blade",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 5350,
+      "resourceKey": "Art/Skins/Melee/champions_2024_blade",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_champions_2025_butterfly",
+      "displayName": "Champions 2025 Butterfly",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 5350,
+      "resourceKey": "Art/Skins/Melee/champions_2025_butterfly",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_vct_2025_karambit",
+      "displayName": "VCT 2025 Karambit",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 5350,
+      "resourceKey": "Art/Skins/Melee/vct_2025_karambit",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_vct_2026_sigil",
+      "displayName": "VCT 2026 Sigil",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 5350,
+      "resourceKey": "Art/Skins/Melee/vct_2026_sigil",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_obsidiana",
+      "displayName": "Obsidiana",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/obsidiana",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_composite",
+      "displayName": "Composite",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/composite",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_atlas_cmd_baton",
+      "displayName": "ATLAS // CMD Baton",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/atlas_cmd_baton",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_overlay_dagger",
+      "displayName": "Overlay Dagger",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/overlay_dagger",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_striker",
+      "displayName": "Striker",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/striker",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_comet_sword",
+      "displayName": "Comet Sword",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/comet_sword",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_songsteel",
+      "displayName": "Songsteel",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/songsteel",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_vct_lock_in_misericordia",
+      "displayName": "VCT LOCK//IN Misericórdia",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 5350,
+      "resourceKey": "Art/Skins/Melee/vct_lock_in_misericordia",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_hivemind_sword",
+      "displayName": "Hivemind Sword",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/hivemind_sword",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_venturi",
+      "displayName": "Venturi",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/venturi",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_velocity_karambit",
+      "displayName": "Velocity Karambit",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/velocity_karambit",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_heart_splitter",
+      "displayName": "Heart Splitter",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/heart_splitter",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_interhelm_sword",
+      "displayName": "Interhelm Sword",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/interhelm_sword",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_ruin_dagger",
+      "displayName": "Ruin Dagger",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/ruin_dagger",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_sys",
+      "displayName": ".SYS",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/sys",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_hieroscape_blades",
+      "displayName": "Hieroscape Blades",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/hieroscape_blades",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_bubble_pop_light_stick",
+      "displayName": "Bubble Pop Light Stick",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/bubble_pop_light_stick",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_outpost",
+      "displayName": "Outpost",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/outpost",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_guardrail_hammer",
+      "displayName": "Guardrail Hammer",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/guardrail_hammer",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_bound",
+      "displayName": "Bound",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/bound",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_prism_iii_axe",
+      "displayName": "Prism III Axe",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/prism_iii_axe",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_kingdom",
+      "displayName": "Kingdom",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/kingdom",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_k_tac_blade",
+      "displayName": "K/TAC Blade",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/k_tac_blade",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_iridian_thorn_blade",
+      "displayName": "Iridian Thorn Blade",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/iridian_thorn_blade",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_arcane_gauntlets",
+      "displayName": "Arcane Gauntlets",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/arcane_gauntlets",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_montage_axe",
+      "displayName": "Montage Axe",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/montage_axe",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_genesis_arc",
+      "displayName": "Genesis Arc",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/genesis_arc",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_artisan_foil",
+      "displayName": "Artisan Foil",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/artisan_foil",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_keys_to_elysium",
+      "displayName": "Keys to Elysium",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/keys_to_elysium",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_hi_dr0_baton",
+      "displayName": "Hi-DR0 Baton",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/hi_dr0_baton",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_shellspire_sword",
+      "displayName": "Shellspire Sword",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/shellspire_sword",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_transition",
+      "displayName": "Transition",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/transition",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_byteshift",
+      "displayName": "Byteshift",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/byteshift",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_torque_coiler",
+      "displayName": "Torque Coiler",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/torque_coiler",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_paceline_s_edge",
+      "displayName": "Paceline's Edge",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/paceline_s_edge",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_tilde",
+      "displayName": "Tilde",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/tilde",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_sandswept_dagger",
+      "displayName": "Sandswept Dagger",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/sandswept_dagger",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_solarex_relic",
+      "displayName": "Solarex Relic",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 1750,
+      "resourceKey": "Art/Skins/Melee/solarex_relic",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_5_years_beta_remastered",
+      "displayName": "5 Years // Beta Remastered",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4350,
+      "resourceKey": "Art/Skins/Melee/5_years_beta_remastered",
+      "enabled": true
+    },
+    {
+      "skinId": "skin_melee_ignite_fan",
+      "displayName": "Ignite Fan",
+      "weapon": "Melee",
+      "rarity": "Exclusive",
+      "vpValue": 4950,
+      "resourceKey": "Art/Skins/Melee/ignite_fan",
+      "enabled": true
+    }
   ]
 }

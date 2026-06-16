@@ -299,5 +299,52 @@
                 "skin_vandal_evori_dreamwings"
             ]
         }
+        ,{
+  "caseId": "melee_case",
+  "displayName": "Melee Case",
+  "price": 2500,
+  "resourceKey": "Art/Cases/Melee_Case",
+  "enabled": true,
+  "themeColor": "#FF4655",
+  "rarityWeights": [
+    {
+      "rarity": "Select",
+      "weight": 10.0
+    },
+    {
+      "rarity": "Deluxe",
+      "weight": 20.0
+    },
+    {
+      "rarity": "Premium",
+      "weight": 35.0
+    },
+    {
+      "rarity": "Exclusive",
+      "weight": 25.0
+    },
+    {
+      "rarity": "Ultra",
+      "weight": 10.0
+    }
+  ],
+  "manualDropPool": [
+    "skin_melee_task_force_809",
+    "skin_melee_obsidiana",
+    "skin_melee_composite",
+    "skin_melee_atlas_cmd_baton",
+    "skin_melee_overlay_dagger",
+    "skin_melee_striker",
+    "skin_melee_comet_sword",
+    "skin_melee_songsteel",
+    "skin_melee_hivemind_sword",
+    "skin_melee_venturi",
+    "skin_melee_velocity_karambit",
+    "skin_melee_heart_splitter",
+    "skin_melee_interhelm_sword",
+    "skin_melee_ruin_dagger",
+    "skin_melee_sys"
+  ]
+}
     ]
 }
