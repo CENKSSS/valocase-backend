@@ -60,6 +60,9 @@ public class PlayerMission {
     @Column(name = "claimed_at")
     private Instant claimedAt;
 
+    @Column(name = "next_reset_at")
+    private Instant nextResetAt;
+
     @Column(name = "reward_vp", nullable = false)
     private long rewardVp;
 
@@ -68,4 +71,17 @@ public class PlayerMission {
 
     @Column(name = "updated_at", nullable = false)
     private Instant updatedAt;
+
+    public boolean isCooldownExpired(Instant now) {
+        return status == MissionStatus.CLAIMED && nextResetAt != null && !now.isBefore(nextResetAt);
+    }
+
+    public void resetForNewCycle(Instant now) {
+        this.progress = 0;
+        this.status = MissionStatus.IN_PROGRESS;
+        this.completedAt = null;
+        this.claimedAt = null;
+        this.nextResetAt = null;
+        this.updatedAt = now;
+    }
 }

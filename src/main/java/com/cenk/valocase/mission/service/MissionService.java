@@ -1,5 +1,6 @@
 package com.cenk.valocase.mission.service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -34,6 +35,8 @@ public class MissionService {
 
     public static final String REASON_MISSION_REWARD = "MISSION_REWARD";
 
+    private static final Duration CLAIM_COOLDOWN = Duration.ofHours(24);
+
     private final MissionDefinitionRepository missionDefinitionRepository;
     private final PlayerMissionRepository playerMissionRepository;
     private final WalletService walletService;
@@ -46,10 +49,14 @@ public class MissionService {
                 .filter(pm -> MissionProgressService.ONE_TIME_PERIOD_KEY.equals(pm.getPeriodKey()))
                 .collect(Collectors.toMap(PlayerMission::getMissionId, Function.identity(), (a, b) -> a));
 
+        Instant now = Instant.now();
+
         return definitions.stream().map(def -> {
             PlayerMission pm = progressByMission.get(def.getId());
-            int progress = pm != null ? pm.getProgress() : 0;
-            MissionStatus status = pm != null ? pm.getStatus() : MissionStatus.IN_PROGRESS;
+            boolean reset = pm == null || pm.isCooldownExpired(now);
+            int progress = reset ? 0 : pm.getProgress();
+            MissionStatus status = reset ? MissionStatus.IN_PROGRESS : pm.getStatus();
+            Instant nextResetAt = status == MissionStatus.CLAIMED ? pm.getNextResetAt() : null;
             return new MissionResponse(
                     def.getId().toString(),
                     def.getCode(),
@@ -59,7 +66,8 @@ public class MissionService {
                     def.getTargetCount(),
                     progress,
                     def.getRewardVp(),
-                    status.name()
+                    status.name(),
+                    nextResetAt
             );
         }).toList();
     }
@@ -84,11 +92,13 @@ public class MissionService {
                 .credit(accountId, pm.getRewardVp(), REASON_MISSION_REWARD, pm.getId())
                 .getVpBalance();
 
+        Instant now = Instant.now();
         pm.setStatus(MissionStatus.CLAIMED);
-        pm.setClaimedAt(Instant.now());
-        pm.setUpdatedAt(Instant.now());
+        pm.setClaimedAt(now);
+        pm.setNextResetAt(now.plus(CLAIM_COOLDOWN));
+        pm.setUpdatedAt(now);
         playerMissionRepository.save(pm);
 
-        return new MissionClaimResponse(pm.getRewardVp(), newVpBalance, MissionStatus.CLAIMED.name());
+        return new MissionClaimResponse(pm.getRewardVp(), newVpBalance, MissionStatus.CLAIMED.name(), pm.getNextResetAt());
     }
 }

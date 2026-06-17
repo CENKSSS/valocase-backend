@@ -111,4 +111,67 @@ class MissionServiceTest {
         assertEquals(MissionStatus.CLAIMED, completed.getStatus());
         verify(playerMissionRepository).save(completed);
     }
+
+    @Test
+    void claim_setsCooldownAroundClaimedAtPlus24h() {
+        PlayerMission completed = pm(MissionStatus.COMPLETED, 500);
+        when(missionDefinitionRepository.findById(MISSION)).thenReturn(Optional.of(def()));
+        when(playerMissionRepository.findForUpdate(eq(ACCOUNT), eq(MISSION), any()))
+                .thenReturn(Optional.of(completed));
+        Wallet wallet = new Wallet();
+        wallet.setVpBalance(10500L);
+        when(walletService.credit(eq(ACCOUNT), eq(500L), eq(MissionService.REASON_MISSION_REWARD), eq(completed.getId())))
+                .thenReturn(wallet);
+
+        java.time.Instant before = java.time.Instant.now();
+        MissionClaimResponse result = service.claim(ACCOUNT, MISSION);
+        java.time.Instant after = java.time.Instant.now();
+
+        assertEquals(completed.getNextResetAt(), result.nextResetAt());
+        org.junit.jupiter.api.Assertions.assertFalse(
+                completed.getNextResetAt().isBefore(completed.getClaimedAt().plus(java.time.Duration.ofHours(24))));
+        org.junit.jupiter.api.Assertions.assertFalse(
+                completed.getNextResetAt().isBefore(before.plus(java.time.Duration.ofHours(24))));
+        org.junit.jupiter.api.Assertions.assertFalse(
+                completed.getNextResetAt().isAfter(after.plus(java.time.Duration.ofHours(24))));
+    }
+
+    @Test
+    void getMissions_claimedWithinCooldown_reportsNextResetAt() {
+        MissionDefinition d = def();
+        d.setTargetCount(3);
+        d.setRewardVp(500);
+        PlayerMission claimed = pm(MissionStatus.CLAIMED, 500);
+        claimed.setPeriodKey(MissionProgressService.ONE_TIME_PERIOD_KEY);
+        claimed.setProgress(3);
+        claimed.setNextResetAt(java.time.Instant.now().plusSeconds(3600));
+        when(missionDefinitionRepository.findByActiveTrueOrderBySortOrderAsc()).thenReturn(java.util.List.of(d));
+        when(playerMissionRepository.findByAccountId(ACCOUNT)).thenReturn(java.util.List.of(claimed));
+
+        var responses = service.getMissions(ACCOUNT);
+
+        assertEquals(1, responses.size());
+        assertEquals(MissionStatus.CLAIMED.name(), responses.get(0).status());
+        assertEquals(3, responses.get(0).progress());
+        assertEquals(claimed.getNextResetAt(), responses.get(0).nextResetAt());
+    }
+
+    @Test
+    void getMissions_claimedAfterCooldown_reportsResetAndAvailable() {
+        MissionDefinition d = def();
+        d.setTargetCount(3);
+        d.setRewardVp(500);
+        PlayerMission claimed = pm(MissionStatus.CLAIMED, 500);
+        claimed.setPeriodKey(MissionProgressService.ONE_TIME_PERIOD_KEY);
+        claimed.setProgress(3);
+        claimed.setNextResetAt(java.time.Instant.now().minusSeconds(1));
+        when(missionDefinitionRepository.findByActiveTrueOrderBySortOrderAsc()).thenReturn(java.util.List.of(d));
+        when(playerMissionRepository.findByAccountId(ACCOUNT)).thenReturn(java.util.List.of(claimed));
+
+        var responses = service.getMissions(ACCOUNT);
+
+        assertEquals(MissionStatus.IN_PROGRESS.name(), responses.get(0).status());
+        assertEquals(0, responses.get(0).progress());
+        org.junit.jupiter.api.Assertions.assertNull(responses.get(0).nextResetAt());
+    }
 }

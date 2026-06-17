@@ -57,11 +57,14 @@ public class MissionProgressService {
             }
 
             PlayerMission pm = existing.get();
+            if (pm.isCooldownExpired(now)) {
+                pm.resetForNewCycle(now);
+            }
             if (pm.getStatus() == MissionStatus.IN_PROGRESS) {
                 applyProgress(pm, quantity, def.getTargetCount(), now);
                 playerMissionRepository.save(pm);
             }
-            // COMPLETED or CLAIMED: progress is frozen.
+            // COMPLETED or CLAIMED within cooldown: progress is frozen.
         }
     }
 

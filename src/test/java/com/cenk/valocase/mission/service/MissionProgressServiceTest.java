@@ -82,6 +82,46 @@ class MissionProgressServiceTest {
     }
 
     @Test
+    void claimedMission_withinCooldown_isNotAdvanced() {
+        MissionDefinition d = def(3, 500);
+        PlayerMission existing = new PlayerMission();
+        existing.setProgress(3);
+        existing.setStatus(MissionStatus.CLAIMED);
+        existing.setNextResetAt(java.time.Instant.now().plusSeconds(3600));
+        when(missionDefinitionRepository.findByActiveTrueAndEventType(MissionEventTypes.CASE_OPENED))
+                .thenReturn(List.of(d));
+        when(playerMissionRepository.findByAccountIdAndMissionIdAndPeriodKey(eq(ACCOUNT), eq(d.getId()), any()))
+                .thenReturn(Optional.of(existing));
+
+        service.recordProgress(ACCOUNT, MissionEventTypes.CASE_OPENED, 1);
+
+        assertEquals(3, existing.getProgress());
+        assertEquals(MissionStatus.CLAIMED, existing.getStatus());
+        verify(playerMissionRepository, org.mockito.Mockito.never()).save(any());
+    }
+
+    @Test
+    void claimedMission_afterCooldown_resetsThenAdvances() {
+        MissionDefinition d = def(3, 500);
+        PlayerMission existing = new PlayerMission();
+        existing.setProgress(3);
+        existing.setStatus(MissionStatus.CLAIMED);
+        existing.setNextResetAt(java.time.Instant.now().minusSeconds(1));
+        when(missionDefinitionRepository.findByActiveTrueAndEventType(MissionEventTypes.CASE_OPENED))
+                .thenReturn(List.of(d));
+        when(playerMissionRepository.findByAccountIdAndMissionIdAndPeriodKey(eq(ACCOUNT), eq(d.getId()), any()))
+                .thenReturn(Optional.of(existing));
+
+        service.recordProgress(ACCOUNT, MissionEventTypes.CASE_OPENED, 1);
+
+        assertEquals(1, existing.getProgress());
+        assertEquals(MissionStatus.IN_PROGRESS, existing.getStatus());
+        org.junit.jupiter.api.Assertions.assertNull(existing.getClaimedAt());
+        org.junit.jupiter.api.Assertions.assertNull(existing.getNextResetAt());
+        verify(playerMissionRepository).save(existing);
+    }
+
+    @Test
     void completedMission_isNotAdvancedFurther() {
         MissionDefinition d = def(3, 500);
         PlayerMission existing = new PlayerMission();
