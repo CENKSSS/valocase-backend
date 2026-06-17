@@ -51,7 +51,7 @@ public class WalletService {
     @Transactional(readOnly = true)
     public WalletResponse getWalletForAccount(UUID accountId) {
         Wallet wallet = requireWallet(accountId);
-        return new WalletResponse(accountId.toString(), wallet.getVpBalance(), wallet.getUpdatedAt());
+        return new WalletResponse(accountId.toString(), wallet.getVpBalance(), wallet.getUpdatedAt(), null);
     }
 
     /** Adds VP to an account's wallet. {@code amount} must be positive. */

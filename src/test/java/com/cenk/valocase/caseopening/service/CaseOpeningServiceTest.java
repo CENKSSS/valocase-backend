@@ -16,10 +16,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
+import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 
+import com.cenk.valocase.account.domain.Account;
+import com.cenk.valocase.account.repository.AccountRepository;
 import com.cenk.valocase.caseopening.domain.CaseOpening;
 import com.cenk.valocase.caseopening.dto.OpenCaseResultResponse;
 import com.cenk.valocase.caseopening.repository.CaseOpeningRepository;
@@ -32,6 +35,8 @@ import com.cenk.valocase.catalog.repository.SkinRepository;
 import com.cenk.valocase.common.exception.ApiException;
 import com.cenk.valocase.inventory.domain.InventoryItem;
 import com.cenk.valocase.inventory.service.InventoryService;
+import com.cenk.valocase.progression.CategoryLockedException;
+import com.cenk.valocase.progression.service.ProgressionService;
 import com.cenk.valocase.wallet.domain.Wallet;
 import com.cenk.valocase.wallet.service.WalletService;
 
@@ -46,11 +51,22 @@ class CaseOpeningServiceTest {
     @Mock private CaseOpeningRepository caseOpeningRepository;
     @Mock private DropSelector dropSelector;
     @Mock private ApplicationEventPublisher eventPublisher;
+    @Mock private AccountRepository accountRepository;
+    @Spy private ProgressionService progressionService = new ProgressionService();
 
     @InjectMocks private CaseOpeningService caseOpeningService;
 
     private static final UUID ACCOUNT_ID = UUID.randomUUID();
     private static final String CASE_ID = "vandal_basic";
+
+    /** Account at a level high enough that every category is unlocked. */
+    private static Account unlockedAccount() {
+        Account account = new Account();
+        account.setLevel(20);
+        account.setCurrentLevelXp(0);
+        account.setTotalXp(0L);
+        return account;
+    }
 
     private static CaseDefinition caseDef(boolean active, int price) {
         CaseDefinition c = new CaseDefinition();
@@ -102,6 +118,7 @@ class CaseOpeningServiceTest {
     @Test
     void emptyDropPool_throws500_andNoMutation() {
         when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(true, 500)));
+        when(accountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(unlockedAccount()));
         when(caseEntryRepository.findByCaseIdOrderBySkinIdAsc(CASE_ID)).thenReturn(List.of());
 
         ApiException ex = assertThrows(ApiException.class, () -> caseOpeningService.open(ACCOUNT_ID, CASE_ID));
@@ -118,6 +135,7 @@ class CaseOpeningServiceTest {
         UUID itemId = UUID.randomUUID();
 
         when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(true, 500)));
+        when(accountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(unlockedAccount()));
         when(caseEntryRepository.findByCaseIdOrderBySkinIdAsc(CASE_ID)).thenReturn(List.of(winning));
         when(skinRepository.findAllById(any())).thenReturn(List.of(skin(skinId, true)));
         when(dropSelector.selectWeighted(any())).thenReturn(winning);
@@ -142,8 +160,39 @@ class CaseOpeningServiceTest {
         assertEquals(9500L, result.newVpBalance());
         assertEquals(itemId.toString(), result.inventoryItemId());
 
+        // A successful open grants 5 XP and reports updated progression.
+        assertEquals(5, result.progression().xpGranted());
+        assertEquals(20, result.progression().xpRequiredForNextLevel());
+        assertEquals(5, result.progression().currentLevelXp());
+        assertEquals(5L, result.progression().totalXp());
+
         verify(walletService).debit(ACCOUNT_ID, 500L, CaseOpeningService.REASON_CASE_OPEN, openingId);
         verify(inventoryService).addItem(ACCOUNT_ID, skinId, InventoryService.SOURCE_CASE_OPENING, openingId);
+    }
+
+    @Test
+    void lockedCategory_throws403_andDoesNotChargeVpOrGrantXp() {
+        // vandal_basic requires level 9; a level-1 account cannot open it.
+        Account locked = new Account();
+        locked.setLevel(1);
+        locked.setCurrentLevelXp(0);
+        locked.setTotalXp(0L);
+
+        when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(true, 500)));
+        when(accountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(locked));
+
+        CategoryLockedException ex = assertThrows(CategoryLockedException.class,
+                () -> caseOpeningService.open(ACCOUNT_ID, CASE_ID));
+        assertEquals(HttpStatus.FORBIDDEN, ex.getStatus());
+        assertEquals(9, ex.getRequiredLevel());
+        assertEquals(1, ex.getCurrentLevel());
+
+        // No reward roll, no VP charge, no XP grant, no level change.
+        verify(walletService, never()).debit(any(), org.mockito.ArgumentMatchers.anyLong(), any(), any());
+        verify(inventoryService, never()).addItem(any(), any(), any(), any());
+        assertEquals(1, locked.getLevel());
+        assertEquals(0, locked.getCurrentLevelXp());
+        assertEquals(0L, locked.getTotalXp());
     }
 
     @Test
@@ -153,6 +202,7 @@ class CaseOpeningServiceTest {
         UUID openingId = UUID.randomUUID();
 
         when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(true, 0)));
+        when(accountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(unlockedAccount()));
         when(caseEntryRepository.findByCaseIdOrderBySkinIdAsc(CASE_ID)).thenReturn(List.of(winning));
         when(skinRepository.findAllById(any())).thenReturn(List.of(skin(skinId, true)));
         when(dropSelector.selectWeighted(any())).thenReturn(winning);
@@ -162,7 +212,7 @@ class CaseOpeningServiceTest {
             return o;
         });
         when(walletService.getWalletForAccount(ACCOUNT_ID))
-                .thenReturn(new com.cenk.valocase.wallet.dto.WalletResponse(ACCOUNT_ID.toString(), 10000L, null));
+                .thenReturn(new com.cenk.valocase.wallet.dto.WalletResponse(ACCOUNT_ID.toString(), 10000L, null, null));
         InventoryItem item = new InventoryItem();
         item.setId(UUID.randomUUID());
         when(inventoryService.addItem(eq(ACCOUNT_ID), eq(skinId), eq(InventoryService.SOURCE_CASE_OPENING), eq(openingId)))

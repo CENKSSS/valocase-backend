@@ -46,4 +46,16 @@ public class Account {
 
     @Column(name = "last_seen_at", nullable = false)
     private Instant lastSeenAt;
+
+    /** Current player level. Starts at 1. */
+    @Column(name = "level", nullable = false)
+    private int level = 1;
+
+    /** XP accumulated toward the next level (leftover is kept on level up). */
+    @Column(name = "current_level_xp", nullable = false)
+    private int currentLevelXp = 0;
+
+    /** Lifetime XP ever earned. */
+    @Column(name = "total_xp", nullable = false)
+    private long totalXp = 0L;
 }
