@@ -1,6 +1,7 @@
 package com.cenk.valocase.battle.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -82,6 +83,7 @@ class BattleLobbyServiceTest {
 
     private static final UUID CREATOR = UUID.randomUUID();
     private static final UUID JOINER = UUID.randomUUID();
+    private static final UUID OTHER = UUID.randomUUID();
     private static final UUID LOBBY = UUID.randomUUID();
     private static final String CASE_ID = "classic_basic";
 
@@ -179,7 +181,7 @@ class BattleLobbyServiceTest {
         lobby.setStatus(LobbyStatus.WAITING);
         when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
 
-        ApiException ex = assertThrows(ApiException.class, () -> service.joinLobby(CREATOR, LOBBY));
+        ApiException ex = assertThrows(ApiException.class, () -> service.joinLobby(CREATOR, LOBBY, 1));
         assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
         verify(walletService, never()).debit(any(), anyLong(), any(), any());
     }
@@ -348,12 +350,12 @@ class BattleLobbyServiceTest {
     }
 
     @Test
-    void cancelStaleLobby_anotherRealPlayerJoined_isNotCancelled() {
+    void cancelStaleLobby_afterTimeout_cancelsAndRefundsAllRealParticipants() {
         BattleLobby lobby = new BattleLobby();
         lobby.setId(LOBBY);
         lobby.setCreatorAccountId(CREATOR);
         lobby.setStatus(LobbyStatus.WAITING);
-        lobby.setCreatedAt(Instant.now().minus(10, ChronoUnit.MINUTES)); // stale by age
+        lobby.setCreatedAt(Instant.now().minus(3, ChronoUnit.MINUTES)); // past 2-minute timeout
 
         when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
         when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(
@@ -363,40 +365,52 @@ class BattleLobbyServiceTest {
 
         service.cancelStaleLobby(LOBBY);
 
-        // Another real player joined: the creator-only stale rule does not apply.
+        assertEquals(LobbyStatus.CANCELLED, lobby.getStatus());
+        verify(walletService).credit(eq(CREATOR), eq(200L), any(), eq(LOBBY));
+        verify(walletService).credit(eq(JOINER), eq(200L), any(), eq(LOBBY));
+    }
+
+    @Test
+    void cancelStaleLobby_beforeTimeout_remainsActive() {
+        BattleLobby lobby = new BattleLobby();
+        lobby.setId(LOBBY);
+        lobby.setCreatorAccountId(CREATOR);
+        lobby.setStatus(LobbyStatus.WAITING);
+        lobby.setCreatedAt(Instant.now().minus(90, ChronoUnit.SECONDS)); // under 2 minutes
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+
+        service.cancelStaleLobby(LOBBY);
+
         assertEquals(LobbyStatus.WAITING, lobby.getStatus());
         verify(walletService, never()).credit(any(), anyLong(), any(), any());
     }
 
     @Test
-    void listOpenLobbies_excludesStaleCreatorOnly_keepsJoined() {
-        BattleLobby stale = new BattleLobby();
-        stale.setId(UUID.randomUUID());
-        stale.setCreatorAccountId(CREATOR);
-        stale.setCaseId(CASE_ID);
-        stale.setStatus(LobbyStatus.WAITING);
-        stale.setCreatedAt(Instant.now().minus(1, ChronoUnit.MINUTES)); // stale, creator-only
+    void listOpenLobbies_excludesExpired_keepsFresh() {
+        BattleLobby expired = new BattleLobby();
+        expired.setId(UUID.randomUUID());
+        expired.setCreatorAccountId(CREATOR);
+        expired.setCaseId(CASE_ID);
+        expired.setStatus(LobbyStatus.WAITING);
+        expired.setCreatedAt(Instant.now().minus(3, ChronoUnit.MINUTES)); // expired
 
-        BattleLobby joined = new BattleLobby();
-        joined.setId(UUID.randomUUID());
-        joined.setCreatorAccountId(CREATOR);
-        joined.setCaseId(CASE_ID);
-        joined.setStatus(LobbyStatus.WAITING);
-        joined.setCreatedAt(Instant.now().minus(1, ChronoUnit.MINUTES)); // old but has a joiner
+        BattleLobby fresh = new BattleLobby();
+        fresh.setId(UUID.randomUUID());
+        fresh.setCreatorAccountId(CREATOR);
+        fresh.setCaseId(CASE_ID);
+        fresh.setStatus(LobbyStatus.WAITING);
+        fresh.setCreatedAt(Instant.now().minus(30, ChronoUnit.SECONDS)); // still valid, creator-only
 
         when(lobbyRepository.findByStatusOrderByCreatedAtDesc(LobbyStatus.WAITING))
-                .thenReturn(List.of(stale, joined));
+                .thenReturn(List.of(expired, fresh));
         when(caseDefinitionRepository.findAllById(any())).thenReturn(List.of(caseDef(100)));
-        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(stale.getId()))
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(fresh.getId()))
                 .thenReturn(List.of(slot(0, SlotType.REAL, CREATOR, true), slot(1, SlotType.EMPTY, null, false)));
-        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(joined.getId()))
-                .thenReturn(List.of(slot(0, SlotType.REAL, CREATOR, true), slot(1, SlotType.REAL, JOINER, false),
-                        slot(2, SlotType.EMPTY, null, false)));
 
-        List<LobbyResponse> out = service.listOpenLobbies();
+        List<LobbyResponse> out = service.listOpenLobbies(CREATOR);
 
         assertEquals(1, out.size());
-        assertEquals(joined.getId().toString(), out.get(0).battleId());
+        assertEquals(fresh.getId().toString(), out.get(0).battleId());
     }
 
     private BattleLobby startingLobby(int rounds) {
@@ -502,7 +516,7 @@ class BattleLobbyServiceTest {
     void completedLobby_excludedFromActiveList() {
         when(lobbyRepository.findByStatusOrderByCreatedAtDesc(LobbyStatus.WAITING)).thenReturn(List.of());
 
-        assertTrue(service.listOpenLobbies().isEmpty());
+        assertTrue(service.listOpenLobbies(CREATOR).isEmpty());
         verify(lobbyRepository).findByStatusOrderByCreatedAtDesc(LobbyStatus.WAITING);
     }
 
@@ -512,7 +526,18 @@ class BattleLobbyServiceTest {
         lobby.setStatus(LobbyStatus.COMPLETED);
         when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
 
-        ApiException ex = assertThrows(ApiException.class, () -> service.joinLobby(JOINER, LOBBY));
+        ApiException ex = assertThrows(ApiException.class, () -> service.joinLobby(JOINER, LOBBY, 1));
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+        verify(walletService, never()).debit(any(), anyLong(), any(), any());
+    }
+
+    @Test
+    void cancelledLobby_cannotJoin() {
+        BattleLobby lobby = startingLobby(2);
+        lobby.setStatus(LobbyStatus.CANCELLED);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+
+        ApiException ex = assertThrows(ApiException.class, () -> service.joinLobby(JOINER, LOBBY, 1));
         assertEquals(HttpStatus.CONFLICT, ex.getStatus());
         verify(walletService, never()).debit(any(), anyLong(), any(), any());
     }
@@ -546,5 +571,139 @@ class BattleLobbyServiceTest {
 
         assertEquals(LobbyStatus.CANCELLED, lobby.getStatus());
         verify(progressionService, never()).grantCaseOpenXp(any(), anyInt());
+    }
+
+    private BattleLobby waitingLobby(int maxSlots) {
+        BattleLobby lobby = new BattleLobby();
+        lobby.setId(LOBBY);
+        lobby.setCreatorAccountId(CREATOR);
+        lobby.setCaseId(CASE_ID);
+        lobby.setRounds(2);
+        lobby.setMaxSlots(maxSlots);
+        lobby.setEntryCost(200L);
+        lobby.setStatus(LobbyStatus.WAITING);
+        lobby.setCreatedAt(Instant.now().minus(1, ChronoUnit.MINUTES));
+        return lobby;
+    }
+
+    @Test
+    void viewingLobby_doesNotChargeOrCreateSlot() {
+        BattleLobby lobby = waitingLobby(2);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY))
+                .thenReturn(List.of(slot(0, SlotType.REAL, CREATOR, true), slot(1, SlotType.EMPTY, null, false)));
+        when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(100)));
+
+        service.getLobby(JOINER, LOBBY);
+
+        verify(walletService, never()).debit(any(), anyLong(), any(), any());
+        verify(slotRepository, never()).save(any());
+    }
+
+    @Test
+    void join_specificSlot_chargesVpAndFillsThatSlot() {
+        BattleLobby lobby = waitingLobby(3);
+        BattleLobbySlot empty = slot(1, SlotType.EMPTY, null, false);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(accountRepository.findById(JOINER)).thenReturn(Optional.of(account(JOINER, 50)));
+        when(progressionService.isCategoryUnlocked(eq(50), any(CaseCategory.class))).thenReturn(true);
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(
+                slot(0, SlotType.REAL, CREATOR, true), empty, slot(2, SlotType.EMPTY, null, false)));
+        when(walletService.debit(eq(JOINER), eq(200L), any(), eq(LOBBY))).thenReturn(new Wallet());
+        when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(100)));
+
+        service.joinLobby(JOINER, LOBBY, 1);
+
+        verify(walletService).debit(eq(JOINER), eq(200L), any(), eq(LOBBY));
+        assertEquals(SlotType.REAL, empty.getSlotType());
+        assertEquals(JOINER, empty.getAccountId());
+    }
+
+    @Test
+    void join_takenSlot_rejected_noCharge() {
+        BattleLobby lobby = waitingLobby(3);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(accountRepository.findById(JOINER)).thenReturn(Optional.of(account(JOINER, 50)));
+        when(progressionService.isCategoryUnlocked(eq(50), any(CaseCategory.class))).thenReturn(true);
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(
+                slot(0, SlotType.REAL, CREATOR, true),
+                slot(1, SlotType.REAL, OTHER, false),
+                slot(2, SlotType.EMPTY, null, false)));
+
+        ApiException ex = assertThrows(ApiException.class, () -> service.joinLobby(JOINER, LOBBY, 1));
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+        verify(walletService, never()).debit(any(), anyLong(), any(), any());
+    }
+
+    @Test
+    void join_alreadyJoined_notChargedTwice() {
+        BattleLobby lobby = waitingLobby(3);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.existsByLobbyIdAndAccountId(LOBBY, JOINER)).thenReturn(true);
+
+        ApiException ex = assertThrows(ApiException.class, () -> service.joinLobby(JOINER, LOBBY, 1));
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+        verify(walletService, never()).debit(any(), anyLong(), any(), any());
+    }
+
+    @Test
+    void leave_viewerWithoutSeat_noMutation() {
+        BattleLobby lobby = waitingLobby(2);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY))
+                .thenReturn(List.of(slot(0, SlotType.REAL, CREATOR, true), slot(1, SlotType.EMPTY, null, false)));
+        when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(100)));
+
+        service.leaveLobby(JOINER, LOBBY);
+
+        verify(walletService, never()).credit(any(), anyLong(), any(), any());
+        verify(slotRepository, never()).save(any());
+    }
+
+    @Test
+    void leave_joinedPlayer_freesSlotAndRefundsOnce() {
+        BattleLobby lobby = waitingLobby(3);
+        BattleLobbySlot joinerSlot = slot(1, SlotType.REAL, JOINER, false);
+        joinerSlot.setChargedVp(200L);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(
+                slot(0, SlotType.REAL, CREATOR, true), joinerSlot, slot(2, SlotType.EMPTY, null, false)));
+        when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(100)));
+
+        service.leaveLobby(JOINER, LOBBY);
+
+        verify(walletService).credit(eq(JOINER), eq(200L), any(), eq(LOBBY));
+        assertEquals(SlotType.EMPTY, joinerSlot.getSlotType());
+    }
+
+    @Test
+    void addBotAllowed_falseForNonHost_trueForHost() {
+        BattleLobby lobby = waitingLobby(2);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY))
+                .thenReturn(List.of(slot(0, SlotType.REAL, CREATOR, true), slot(1, SlotType.EMPTY, null, false)));
+        when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(100)));
+
+        LobbyResponse asNonHost = service.getLobby(JOINER, LOBBY);
+        assertFalse(asNonHost.addBotAvailable());
+        assertFalse(asNonHost.slots().get(1).addBotAllowed());
+
+        LobbyResponse asHost = service.getLobby(CREATOR, LOBBY);
+        assertTrue(asHost.addBotAvailable());
+        assertTrue(asHost.slots().get(1).addBotAllowed());
+    }
+
+    @Test
+    void host_canAddBot_afterDelay() {
+        BattleLobby lobby = waitingLobby(2);
+        BattleLobbySlot empty = slot(1, SlotType.EMPTY, null, false);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY))
+                .thenReturn(List.of(slot(0, SlotType.REAL, CREATOR, true), empty));
+        when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(100)));
+
+        service.addBot(CREATOR, LOBBY);
+
+        assertEquals(SlotType.BOT, empty.getSlotType());
     }
 }

@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.cenk.valocase.account.domain.Account;
 import com.cenk.valocase.account.service.AccountService;
 import com.cenk.valocase.battle.dto.CreateLobbyRequest;
+import com.cenk.valocase.battle.dto.JoinSlotRequest;
 import com.cenk.valocase.battle.dto.LobbyResponse;
 import com.cenk.valocase.battle.service.BattleLobbyService;
 import com.cenk.valocase.common.exception.ApiException;
@@ -51,8 +52,8 @@ public class BattleLobbyController {
     @GetMapping
     public List<LobbyResponse> list(
             @RequestHeader(value = "X-Guest-Token", required = false) String guestToken) {
-        accountService.requireAccountByToken(guestToken);
-        return lobbyService.listOpenLobbies();
+        Account account = accountService.requireAccountByToken(guestToken);
+        return lobbyService.listOpenLobbies(account.getId());
     }
 
     /**
@@ -68,13 +69,26 @@ public class BattleLobbyController {
         return lobbyService.getLobby(account.getId(), parseId(battleId));
     }
 
-    /** Joins the lobby as a real player, charging the entry cost on success. */
+    /** Joins a specific empty slot as a real player, charging the entry cost on success. */
     @PostMapping("/{battleId}/join")
     public LobbyResponse join(
             @RequestHeader(value = "X-Guest-Token", required = false) String guestToken,
+            @PathVariable String battleId,
+            @RequestBody(required = false) JoinSlotRequest request) {
+        Account account = accountService.requireAccountByToken(guestToken);
+        if (request == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Request body with slotIndex is required");
+        }
+        return lobbyService.joinLobby(account.getId(), parseId(battleId), request.slotIndex());
+    }
+
+    /** Leaves a slot while WAITING, freeing it and refunding the entry cost once. */
+    @PostMapping("/{battleId}/leave")
+    public LobbyResponse leave(
+            @RequestHeader(value = "X-Guest-Token", required = false) String guestToken,
             @PathVariable String battleId) {
         Account account = accountService.requireAccountByToken(guestToken);
-        return lobbyService.joinLobby(account.getId(), parseId(battleId));
+        return lobbyService.leaveLobby(account.getId(), parseId(battleId));
     }
 
     /** Creator fills one empty slot with one bot (allowed after the 3-second delay). */
@@ -85,10 +99,6 @@ public class BattleLobbyController {
         Account account = accountService.requireAccountByToken(guestToken);
         return lobbyService.addBot(account.getId(), parseId(battleId));
     }
-
-    // No cancel / leave endpoint by design: creating or joining a lobby commits
-    // the player. A host who is never joined is released automatically by the
-    // server-side creator-only stale rule (which refunds them once).
 
     private static UUID parseId(String battleId) {
         try {

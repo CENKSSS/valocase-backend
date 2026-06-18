@@ -82,12 +82,11 @@ public class BattleLobbyService {
     /** A full lobby waits this long before the battle resolves. */
     public static final Duration START_DELAY = Duration.ofSeconds(1);
     /**
-     * A creator-only WAITING lobby older than this is stale: nobody joined, so
-     * the cleanup job cancels it and refunds the host exactly once, and it stops
-     * appearing in the public list. A lobby that another real player has joined
-     * is NOT cancelled by this rule.
+     * A WAITING lobby that has not started within this window expires: the
+     * cleanup job cancels it, refunds every real participant once, and it stops
+     * appearing in the public list.
      */
-    public static final Duration LOBBY_STALE_AFTER = Duration.ofSeconds(15);
+    public static final Duration LOBBY_TIMEOUT = Duration.ofMinutes(2);
     /**
      * A real-player slot is "connected" if it was seen within this window. A
      * winner that is not connected at resolution receives no reward.
@@ -174,31 +173,29 @@ public class BattleLobbyService {
             walletService.debit(accountId, entryCost, REASON_LOBBY_ENTRY, lobbyId);
         }
 
-        return mapLobby(lobby, slots, caseDef);
+        return mapLobby(lobby, slots, caseDef, accountId);
     }
 
     // --- List ------------------------------------------------------------------
 
     @Transactional(readOnly = true)
-    public List<LobbyResponse> listOpenLobbies() {
+    public List<LobbyResponse> listOpenLobbies(UUID viewerAccountId) {
         List<BattleLobby> lobbies = lobbyRepository.findByStatusOrderByCreatedAtDesc(LobbyStatus.WAITING);
         if (lobbies.isEmpty()) {
             return List.of();
         }
-        Instant staleCutoff = Instant.now().minus(LOBBY_STALE_AFTER);
+        Instant expiryCutoff = Instant.now().minus(LOBBY_TIMEOUT);
         Map<String, CaseDefinition> caseById = caseDefinitionRepository
                 .findAllById(lobbies.stream().map(BattleLobby::getCaseId).distinct().toList())
                 .stream().collect(Collectors.toMap(CaseDefinition::getId, Function.identity()));
 
         List<LobbyResponse> out = new ArrayList<>(lobbies.size());
         for (BattleLobby lobby : lobbies) {
-            List<BattleLobbySlot> slots = slotRepository.findByLobbyIdOrderBySlotIndexAsc(lobby.getId());
-            // Hide creator-only lobbies past the stale window even before the
-            // cleanup job cancels them. Lobbies a real player has joined stay.
-            if (isCreatorOnly(slots) && lobby.getCreatedAt().isBefore(staleCutoff)) {
+            if (lobby.getCreatedAt().isBefore(expiryCutoff)) {
                 continue;
             }
-            out.add(mapLobby(lobby, slots, caseById.get(lobby.getCaseId())));
+            List<BattleLobbySlot> slots = slotRepository.findByLobbyIdOrderBySlotIndexAsc(lobby.getId());
+            out.add(mapLobby(lobby, slots, caseById.get(lobby.getCaseId()), viewerAccountId));
         }
         return out;
     }
@@ -233,13 +230,13 @@ public class BattleLobbyService {
             resolve(lobby, slots);
         }
 
-        return mapLobby(lobby, slots, caseDefinitionRepository.findById(lobby.getCaseId()).orElse(null));
+        return mapLobby(lobby, slots, caseDefinitionRepository.findById(lobby.getCaseId()).orElse(null), viewerAccountId);
     }
 
     // --- Join ------------------------------------------------------------------
 
     @Transactional
-    public LobbyResponse joinLobby(UUID accountId, UUID lobbyId) {
+    public LobbyResponse joinLobby(UUID accountId, UUID lobbyId, int slotIndex) {
         BattleLobby lobby = lobbyRepository.findByIdForUpdate(lobbyId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Lobby not found: " + lobbyId));
         if (lobby.getStatus() != LobbyStatus.WAITING) {
@@ -253,12 +250,16 @@ public class BattleLobbyService {
         }
 
         Account joiner = requireAccount(accountId);
-        // Level-lock BEFORE any charge.
         requireCategoryUnlocked(lobby.getCaseId(), joiner.getLevel());
 
         List<BattleLobbySlot> slots = slotRepository.findByLobbyIdOrderBySlotIndexAsc(lobbyId);
-        BattleLobbySlot target = firstEmptySlot(slots)
-                .orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "Lobby is already full"));
+        BattleLobbySlot target = slots.stream()
+                .filter(s -> s.getSlotIndex() == slotIndex)
+                .findFirst()
+                .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "No such slot: " + slotIndex));
+        if (target.getSlotType() != SlotType.EMPTY) {
+            throw new ApiException(HttpStatus.CONFLICT, "Slot " + slotIndex + " is already taken");
+        }
 
         long entryCost = lobby.getEntryCost();
         if (entryCost > 0) {
@@ -273,7 +274,42 @@ public class BattleLobbyService {
         slotRepository.save(target);
 
         markStartingIfFull(lobby, slots);
-        return mapLobby(lobby, slots, caseDefinitionRepository.findById(lobby.getCaseId()).orElse(null));
+        return mapLobby(lobby, slots, caseDefinitionRepository.findById(lobby.getCaseId()).orElse(null), accountId);
+    }
+
+    // --- Leave (only while WAITING; frees the slot and refunds once) -----------
+
+    @Transactional
+    public LobbyResponse leaveLobby(UUID accountId, UUID lobbyId) {
+        BattleLobby lobby = lobbyRepository.findByIdForUpdate(lobbyId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Lobby not found: " + lobbyId));
+        if (lobby.getStatus() != LobbyStatus.WAITING) {
+            throw new ApiException(HttpStatus.CONFLICT, "You can only leave while the lobby is waiting");
+        }
+
+        List<BattleLobbySlot> slots = slotRepository.findByLobbyIdOrderBySlotIndexAsc(lobbyId);
+        BattleLobbySlot seat = slots.stream()
+                .filter(s -> s.getSlotType() == SlotType.REAL && accountId.equals(s.getAccountId()))
+                .findFirst()
+                .orElse(null);
+        if (seat == null) {
+            return mapLobby(lobby, slots, caseDefinitionRepository.findById(lobby.getCaseId()).orElse(null), accountId);
+        }
+        if (seat.isCreator()) {
+            throw new ApiException(HttpStatus.CONFLICT, "The host cannot leave; the lobby expires if it never starts");
+        }
+
+        if (seat.getChargedVp() > 0) {
+            walletService.credit(accountId, seat.getChargedVp(), REASON_LOBBY_REFUND, lobbyId);
+        }
+        seat.setSlotType(SlotType.EMPTY);
+        seat.setAccountId(null);
+        seat.setDisplayName(null);
+        seat.setChargedVp(0L);
+        seat.setLastSeenAt(null);
+        slotRepository.save(seat);
+
+        return mapLobby(lobby, slots, caseDefinitionRepository.findById(lobby.getCaseId()).orElse(null), accountId);
     }
 
     // --- Add Bot ---------------------------------------------------------------
@@ -304,28 +340,23 @@ public class BattleLobbyService {
         slotRepository.save(target);
 
         markStartingIfFull(lobby, slots);
-        return mapLobby(lobby, slots, caseDefinitionRepository.findById(lobby.getCaseId()).orElse(null));
+        return mapLobby(lobby, slots, caseDefinitionRepository.findById(lobby.getCaseId()).orElse(null), accountId);
     }
 
-    // --- Maintenance: stale cleanup + fallback start ---------------------------
-    //
-    // There is intentionally no manual cancel / leave: once a player creates or
-    // joins a lobby they are committed. The only exit is the automatic
-    // creator-only stale rule below, which refunds the host if nobody joins.
+    // --- Maintenance: expiry cleanup + fallback start --------------------------
 
-    /** Ids of WAITING lobbies that have gone stale and should be cancelled. */
+    /** Ids of WAITING lobbies that have passed the timeout and should be cancelled. */
     @Transactional(readOnly = true)
     public List<UUID> staleWaitingLobbyIds() {
-        Instant cutoff = Instant.now().minus(LOBBY_STALE_AFTER);
+        Instant cutoff = Instant.now().minus(LOBBY_TIMEOUT);
         return lobbyRepository.findByStatusAndCreatedAtBefore(LobbyStatus.WAITING, cutoff)
                 .stream().map(BattleLobby::getId).toList();
     }
 
     /**
-     * Cancels a single stale, creator-only WAITING lobby and refunds the host
-     * exactly once. Re-checks status, staleness and creator-only occupancy under
-     * the row lock, so it never double-refunds, never starts twice, and never
-     * cancels a lobby another real player has already joined.
+     * Cancels a single expired WAITING lobby and refunds every real participant
+     * once. Re-checks status and the timeout under the row lock, so it never
+     * double-refunds and never races a start.
      */
     @Transactional
     public void cancelStaleLobby(UUID lobbyId) {
@@ -333,13 +364,10 @@ public class BattleLobbyService {
         if (lobby == null || lobby.getStatus() != LobbyStatus.WAITING) {
             return;
         }
-        if (lobby.getCreatedAt().isAfter(Instant.now().minus(LOBBY_STALE_AFTER))) {
-            return; // no longer stale (e.g. raced with another action)
+        if (lobby.getCreatedAt().isAfter(Instant.now().minus(LOBBY_TIMEOUT))) {
+            return;
         }
         List<BattleLobbySlot> slots = slotRepository.findByLobbyIdOrderBySlotIndexAsc(lobbyId);
-        if (!isCreatorOnly(slots)) {
-            return; // another real player joined; the stale rule does not apply
-        }
         refundRealOccupants(lobby, slots);
     }
 
@@ -516,12 +544,6 @@ public class BattleLobbyService {
                 .min(Comparator.comparingInt(BattleLobbySlot::getSlotIndex));
     }
 
-    /** True when the only real player is the creator (no other real player joined). */
-    private boolean isCreatorOnly(List<BattleLobbySlot> slots) {
-        return slots.stream()
-                .noneMatch(s -> s.getSlotType() == SlotType.REAL && !s.isCreator());
-    }
-
     /** A real slot seen within the connection window counts as connected. */
     private boolean isConnected(BattleLobbySlot slot, Instant now) {
         return slot.getLastSeenAt() != null
@@ -577,10 +599,13 @@ public class BattleLobbyService {
 
     // --- Mapping ---------------------------------------------------------------
 
-    private LobbyResponse mapLobby(BattleLobby lobby, List<BattleLobbySlot> slots, CaseDefinition caseDef) {
+    private LobbyResponse mapLobby(BattleLobby lobby, List<BattleLobbySlot> slots, CaseDefinition caseDef,
+            UUID viewerAccountId) {
         Instant now = Instant.now();
         Instant addBotAt = addBotAvailableAt(lobby);
-        boolean addBotWindowOpen = lobby.getStatus() == LobbyStatus.WAITING && !now.isBefore(addBotAt);
+        boolean viewerIsHost = lobby.getCreatorAccountId().equals(viewerAccountId);
+        boolean addBotWindowOpen =
+                viewerIsHost && lobby.getStatus() == LobbyStatus.WAITING && !now.isBefore(addBotAt);
 
         int filled = (int) slots.stream().filter(s -> s.getSlotType() != SlotType.EMPTY).count();
 
