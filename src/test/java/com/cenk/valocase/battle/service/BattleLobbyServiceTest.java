@@ -543,6 +543,17 @@ class BattleLobbyServiceTest {
     }
 
     @Test
+    void completedLobby_cannotCancel() {
+        BattleLobby lobby = startingLobby(2);
+        lobby.setStatus(LobbyStatus.COMPLETED);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+
+        ApiException ex = assertThrows(ApiException.class, () -> service.leaveLobby(JOINER, LOBBY));
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+        verify(walletService, never()).credit(any(), anyLong(), any(), any());
+    }
+
+    @Test
     void completedLobby_cannotAddBot() {
         BattleLobby lobby = startingLobby(2);
         lobby.setStatus(LobbyStatus.COMPLETED);
