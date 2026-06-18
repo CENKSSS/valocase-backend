@@ -55,13 +55,17 @@ public class BattleLobbyController {
         return lobbyService.listOpenLobbies();
     }
 
-    /** Returns lobby / waiting-room status, resolving the battle once it is due. */
+    /**
+     * Returns lobby / waiting-room status, resolving the battle once it is due.
+     * Doubles as the heartbeat: a committed real player polling here is marked
+     * connected, which keeps them eligible for the win reward.
+     */
     @GetMapping("/{battleId}")
     public LobbyResponse get(
             @RequestHeader(value = "X-Guest-Token", required = false) String guestToken,
             @PathVariable String battleId) {
-        accountService.requireAccountByToken(guestToken);
-        return lobbyService.getLobby(parseId(battleId));
+        Account account = accountService.requireAccountByToken(guestToken);
+        return lobbyService.getLobby(account.getId(), parseId(battleId));
     }
 
     /** Joins the lobby as a real player, charging the entry cost on success. */
@@ -82,14 +86,9 @@ public class BattleLobbyController {
         return lobbyService.addBot(account.getId(), parseId(battleId));
     }
 
-    /** Creator cancels a waiting lobby (only before another real player joins). */
-    @PostMapping("/{battleId}/cancel")
-    public LobbyResponse cancel(
-            @RequestHeader(value = "X-Guest-Token", required = false) String guestToken,
-            @PathVariable String battleId) {
-        Account account = accountService.requireAccountByToken(guestToken);
-        return lobbyService.cancelLobby(account.getId(), parseId(battleId));
-    }
+    // No cancel / leave endpoint by design: creating or joining a lobby commits
+    // the player. A host who is never joined is released automatically by the
+    // server-side creator-only stale rule (which refunds them once).
 
     private static UUID parseId(String battleId) {
         try {

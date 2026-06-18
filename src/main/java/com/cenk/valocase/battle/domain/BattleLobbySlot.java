@@ -1,5 +1,6 @@
 package com.cenk.valocase.battle.domain;
 
+import java.time.Instant;
 import java.util.UUID;
 
 import jakarta.persistence.Column;
@@ -58,4 +59,13 @@ public class BattleLobbySlot {
     /** VP actually charged to this occupant (0 for empty/bot slots). */
     @Column(name = "charged_vp", nullable = false)
     private long chargedVp;
+
+    /**
+     * Last time a real-player occupant was seen (set on create/join, refreshed
+     * on each status poll). Used at resolution to decide reward eligibility:
+     * a winner not seen within the connection window is treated as disconnected
+     * and receives no reward. NULL for empty/bot slots.
+     */
+    @Column(name = "last_seen_at")
+    private Instant lastSeenAt;
 }

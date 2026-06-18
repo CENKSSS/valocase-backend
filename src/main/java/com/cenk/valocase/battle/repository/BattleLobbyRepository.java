@@ -1,5 +1,6 @@
 package com.cenk.valocase.battle.repository;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -25,6 +26,16 @@ public interface BattleLobbyRepository extends JpaRepository<BattleLobby, UUID> 
     @Query("select l from BattleLobby l where l.id = :id")
     Optional<BattleLobby> findByIdForUpdate(@Param("id") UUID id);
 
-    /** Public, still-open lobbies for the lobby browser, newest first. */
+    /**
+     * Candidate lobbies for the public browser, newest first. Creator-only
+     * lobbies older than the stale window are filtered out in the service (a
+     * lobby that another real player has joined keeps showing past the window).
+     */
     List<BattleLobby> findByStatusOrderByCreatedAtDesc(LobbyStatus status);
+
+    /** Stale lobbies for the cleanup job: same status, created before the cutoff. */
+    List<BattleLobby> findByStatusAndCreatedAtBefore(LobbyStatus status, Instant createdBefore);
+
+    /** Full lobbies whose start delay has elapsed but were never resolved by a poll. */
+    List<BattleLobby> findByStatusAndReadyAtLessThanEqual(LobbyStatus status, Instant readyAtMax);
 }

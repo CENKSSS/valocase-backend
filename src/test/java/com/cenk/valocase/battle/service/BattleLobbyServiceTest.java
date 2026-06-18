@@ -124,6 +124,9 @@ class BattleLobbyServiceTest {
         s.setAccountId(account);
         s.setCreator(creator);
         s.setChargedVp(account != null ? 200L : 0L);
+        if (type == SlotType.REAL) {
+            s.setLastSeenAt(Instant.now()); // connected by default
+        }
         return s;
     }
 
@@ -241,11 +244,155 @@ class BattleLobbyServiceTest {
         when(battleParticipantRepository.findByBattleIdOrderByParticipantIndexAsc(any())).thenReturn(List.of());
         when(battleRollRepository.findByBattleId(any())).thenReturn(List.of());
 
-        LobbyResponse res = service.getLobby(LOBBY);
+        // Connected winner (slot seen "now") polls for the result.
+        LobbyResponse res = service.getLobby(CREATOR, LOBBY);
 
         assertEquals(LobbyStatus.COMPLETED.name(), res.status());
         assertEquals(Integer.valueOf(0), res.winnerSlotIndex());
-        // 2 slots x 2 rounds = 4 rolled skins, all granted to the real winner.
+        // 2 slots x 2 rounds = 4 rolled skins, all granted to the connected winner.
         verify(inventoryService, times(4)).addItem(eq(CREATOR), eq("skin_a"), any(), any());
+    }
+
+    @Test
+    void getLobby_full_andDue_disconnectedWinner_getsNoReward() {
+        BattleLobby lobby = new BattleLobby();
+        lobby.setId(LOBBY);
+        lobby.setCreatorAccountId(CREATOR);
+        lobby.setCaseId(CASE_ID);
+        lobby.setRounds(2);
+        lobby.setMaxSlots(2);
+        lobby.setEntryCost(200L);
+        lobby.setStatus(LobbyStatus.STARTING);
+        lobby.setCreatedAt(Instant.now().minus(2, ChronoUnit.MINUTES));
+        lobby.setReadyAt(Instant.now().minus(1, ChronoUnit.SECONDS)); // due
+
+        BattleLobbySlot winner = slot(0, SlotType.REAL, CREATOR, true);
+        winner.setLastSeenAt(Instant.now().minus(2, ChronoUnit.MINUTES)); // disconnected
+        List<BattleLobbySlot> slots = List.of(winner, slot(1, SlotType.BOT, null, false));
+
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(slots);
+        when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(100)));
+        when(caseEntryRepository.findByCaseIdOrderBySkinIdAsc(CASE_ID)).thenReturn(List.of(entry()));
+        when(skinRepository.findAllById(any())).thenReturn(List.of(skin()));
+        when(dropSelector.selectWeighted(any())).thenReturn(entry());
+        when(battleResolver.winningIndex(any())).thenReturn(0); // disconnected real player wins
+        when(battleRepository.saveAndFlush(any(Battle.class))).thenAnswer(inv -> {
+            Battle b = inv.getArgument(0);
+            b.setId(UUID.randomUUID());
+            return b;
+        });
+        when(battleParticipantRepository.findByBattleIdOrderByParticipantIndexAsc(any())).thenReturn(List.of());
+        when(battleRollRepository.findByBattleId(any())).thenReturn(List.of());
+
+        // A different account polls (not the winner), so no heartbeat re-connects the winner.
+        LobbyResponse res = service.getLobby(JOINER, LOBBY);
+
+        assertEquals(LobbyStatus.COMPLETED.name(), res.status());
+        assertEquals(Integer.valueOf(0), res.winnerSlotIndex());
+        // Winner is disconnected: no inventory reward and no BATTLE_WON event.
+        verify(inventoryService, never()).addItem(any(), any(), any(), any());
+    }
+
+    @Test
+    void cancelStaleLobby_refundsHost_andCancels() {
+        BattleLobby lobby = new BattleLobby();
+        lobby.setId(LOBBY);
+        lobby.setCreatorAccountId(CREATOR);
+        lobby.setStatus(LobbyStatus.WAITING);
+        lobby.setCreatedAt(Instant.now().minus(10, ChronoUnit.MINUTES)); // stale
+
+        BattleLobbySlot creatorSlot = slot(0, SlotType.REAL, CREATOR, true);
+        creatorSlot.setChargedVp(200L);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY))
+                .thenReturn(List.of(creatorSlot, slot(1, SlotType.EMPTY, null, false)));
+
+        service.cancelStaleLobby(LOBBY);
+
+        assertEquals(LobbyStatus.CANCELLED, lobby.getStatus());
+        verify(walletService).credit(eq(CREATOR), eq(200L), any(), eq(LOBBY));
+    }
+
+    @Test
+    void cancelStaleLobby_notStale_isNoOp() {
+        BattleLobby lobby = new BattleLobby();
+        lobby.setId(LOBBY);
+        lobby.setCreatorAccountId(CREATOR);
+        lobby.setStatus(LobbyStatus.WAITING);
+        lobby.setCreatedAt(Instant.now()); // fresh, not stale
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+
+        service.cancelStaleLobby(LOBBY);
+
+        assertEquals(LobbyStatus.WAITING, lobby.getStatus());
+        verify(walletService, never()).credit(any(), anyLong(), any(), any());
+    }
+
+    @Test
+    void cancelStaleLobby_alreadyCompleted_doesNotRefund() {
+        BattleLobby lobby = new BattleLobby();
+        lobby.setId(LOBBY);
+        lobby.setCreatorAccountId(CREATOR);
+        lobby.setStatus(LobbyStatus.COMPLETED);
+        lobby.setCreatedAt(Instant.now().minus(10, ChronoUnit.MINUTES));
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+
+        service.cancelStaleLobby(LOBBY);
+
+        assertEquals(LobbyStatus.COMPLETED, lobby.getStatus());
+        verify(walletService, never()).credit(any(), anyLong(), any(), any());
+    }
+
+    @Test
+    void cancelStaleLobby_anotherRealPlayerJoined_isNotCancelled() {
+        BattleLobby lobby = new BattleLobby();
+        lobby.setId(LOBBY);
+        lobby.setCreatorAccountId(CREATOR);
+        lobby.setStatus(LobbyStatus.WAITING);
+        lobby.setCreatedAt(Instant.now().minus(10, ChronoUnit.MINUTES)); // stale by age
+
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(
+                slot(0, SlotType.REAL, CREATOR, true),
+                slot(1, SlotType.REAL, JOINER, false),
+                slot(2, SlotType.EMPTY, null, false)));
+
+        service.cancelStaleLobby(LOBBY);
+
+        // Another real player joined: the creator-only stale rule does not apply.
+        assertEquals(LobbyStatus.WAITING, lobby.getStatus());
+        verify(walletService, never()).credit(any(), anyLong(), any(), any());
+    }
+
+    @Test
+    void listOpenLobbies_excludesStaleCreatorOnly_keepsJoined() {
+        BattleLobby stale = new BattleLobby();
+        stale.setId(UUID.randomUUID());
+        stale.setCreatorAccountId(CREATOR);
+        stale.setCaseId(CASE_ID);
+        stale.setStatus(LobbyStatus.WAITING);
+        stale.setCreatedAt(Instant.now().minus(1, ChronoUnit.MINUTES)); // stale, creator-only
+
+        BattleLobby joined = new BattleLobby();
+        joined.setId(UUID.randomUUID());
+        joined.setCreatorAccountId(CREATOR);
+        joined.setCaseId(CASE_ID);
+        joined.setStatus(LobbyStatus.WAITING);
+        joined.setCreatedAt(Instant.now().minus(1, ChronoUnit.MINUTES)); // old but has a joiner
+
+        when(lobbyRepository.findByStatusOrderByCreatedAtDesc(LobbyStatus.WAITING))
+                .thenReturn(List.of(stale, joined));
+        when(caseDefinitionRepository.findAllById(any())).thenReturn(List.of(caseDef(100)));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(stale.getId()))
+                .thenReturn(List.of(slot(0, SlotType.REAL, CREATOR, true), slot(1, SlotType.EMPTY, null, false)));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(joined.getId()))
+                .thenReturn(List.of(slot(0, SlotType.REAL, CREATOR, true), slot(1, SlotType.REAL, JOINER, false),
+                        slot(2, SlotType.EMPTY, null, false)));
+
+        List<LobbyResponse> out = service.listOpenLobbies();
+
+        assertEquals(1, out.size());
+        assertEquals(joined.getId().toString(), out.get(0).battleId());
     }
 }
