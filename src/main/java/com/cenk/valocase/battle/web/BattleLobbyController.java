@@ -76,7 +76,7 @@ public class BattleLobbyController {
             @PathVariable String battleId,
             @RequestBody(required = false) JoinSlotRequest request) {
         Account account = accountService.requireAccountByToken(guestToken);
-        if (request == null) {
+        if (request == null || request.slotIndex() == null) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Request body with slotIndex is required");
         }
         return lobbyService.joinLobby(account.getId(), parseId(battleId), request.slotIndex());

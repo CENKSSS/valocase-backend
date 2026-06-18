@@ -706,4 +706,58 @@ class BattleLobbyServiceTest {
 
         assertEquals(SlotType.BOT, empty.getSlotType());
     }
+
+    @Test
+    void addBot_doesNotOverwriteRealPlayer_fillsOnlyEmptySlot() {
+        BattleLobby lobby = waitingLobby(3);
+        BattleLobbySlot seatedReal = slot(1, SlotType.REAL, JOINER, false);
+        BattleLobbySlot empty = slot(2, SlotType.EMPTY, null, false);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY))
+                .thenReturn(List.of(slot(0, SlotType.REAL, CREATOR, true), seatedReal, empty));
+        when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(100)));
+
+        service.addBot(CREATOR, LOBBY);
+
+        // The seated real player is untouched; the bot lands in the only EMPTY slot.
+        assertEquals(SlotType.REAL, seatedReal.getSlotType());
+        assertEquals(JOINER, seatedReal.getAccountId());
+        assertEquals(SlotType.BOT, empty.getSlotType());
+    }
+
+    @Test
+    void viewer_doesNotStartBattle_whileEmptySlotRemains() {
+        BattleLobby lobby = waitingLobby(2);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY))
+                .thenReturn(List.of(slot(0, SlotType.REAL, CREATOR, true), slot(1, SlotType.EMPTY, null, false)));
+        when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(100)));
+
+        // A non-seated viewer polling an unfilled lobby must not trigger a start.
+        LobbyResponse res = service.getLobby(JOINER, LOBBY);
+
+        assertEquals(LobbyStatus.WAITING.name(), res.status());
+        assertEquals(LobbyStatus.WAITING, lobby.getStatus());
+        verify(battleRepository, never()).saveAndFlush(any(Battle.class));
+    }
+
+    @Test
+    void viewer_getsNoRewardOrXp_whenBattleStartsWithoutThem() {
+        BattleLobby lobby = startingLobby(2);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        // Only the host (real) and a bot fill the slots; OTHER is merely a viewer.
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(
+                slot(0, SlotType.REAL, CREATOR, true),
+                slot(1, SlotType.BOT, null, false)));
+        stubResolve();
+        when(battleResolver.winningIndex(any())).thenReturn(0);
+
+        // The viewer (not in any slot) polls and triggers the due resolution.
+        LobbyResponse res = service.getLobby(OTHER, LOBBY);
+
+        assertEquals(LobbyStatus.COMPLETED.name(), res.status());
+        // Viewer is not a participant: no inventory reward and no XP for them.
+        verify(inventoryService, never()).addItem(eq(OTHER), any(), any(), any());
+        verify(progressionService, never()).grantCaseOpenXp(argThat(a -> OTHER.equals(a.getId())), anyInt());
+    }
 }
