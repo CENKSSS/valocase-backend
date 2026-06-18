@@ -74,6 +74,9 @@ public class BattleLobbyService {
     /** Wallet reason for refunding a cancelled lobby's entry charge. */
     public static final String REASON_LOBBY_REFUND = "BATTLE_LOBBY_REFUND";
 
+    /** Flat XP granted to each real participant once a battle completes (per battle, not per round). */
+    public static final int PVP_BATTLE_XP = 5;
+
     /** Add Bot is blocked for this long after lobby creation (shared, server-side). */
     public static final Duration ADD_BOT_DELAY = Duration.ofSeconds(3);
     /** A full lobby waits this long before the battle resolves. */
@@ -455,11 +458,7 @@ public class BattleLobbyService {
             }
         }
 
-        // Winner-takes-all: grant every rolled skin to the winner, but only when
-        // the winner is a real player who is still connected. Same reward logic
-        // as the bot battle; the only added gate is disconnect eligibility. The
-        // winner index (RNG/winner calculation) is unchanged either way, so the
-        // result stays immutable — a disconnected winner simply gets no reward.
+        // Winner-takes-all: every rolled skin goes to a real, connected winner.
         if (winnerSlot.getSlotType() == SlotType.REAL
                 && winnerSlot.getAccountId() != null
                 && isConnected(winnerSlot, Instant.now())) {
@@ -474,11 +473,22 @@ public class BattleLobbyService {
         }
         battleRollRepository.saveAll(rolls);
 
+        grantBattleXp(slots);
+
         lobby.setStatus(LobbyStatus.COMPLETED);
         lobby.setWinnerSlotIndex(winnerIndex);
         lobby.setResultBattleId(battleId);
         lobby.setCompletedAt(Instant.now());
         lobbyRepository.save(lobby);
+    }
+
+    private void grantBattleXp(List<BattleLobbySlot> slots) {
+        for (BattleLobbySlot slot : slots) {
+            if (slot.getSlotType() == SlotType.REAL && slot.getAccountId() != null) {
+                accountRepository.findById(slot.getAccountId())
+                        .ifPresent(account -> progressionService.grantCaseOpenXp(account, PVP_BATTLE_XP));
+            }
+        }
     }
 
     // --- Helpers ---------------------------------------------------------------
@@ -487,6 +497,12 @@ public class BattleLobbyService {
         boolean full = slots.stream().noneMatch(s -> s.getSlotType() == SlotType.EMPTY);
         if (full) {
             Instant now = Instant.now();
+            // Confirm presence for everyone in the lobby at start so a participant
+            // who wins the prompt resolution is reward-eligible.
+            slots.stream()
+                    .filter(s -> s.getSlotType() == SlotType.REAL)
+                    .forEach(s -> s.setLastSeenAt(now));
+            slotRepository.saveAll(slots);
             lobby.setStatus(LobbyStatus.STARTING);
             lobby.setStartedAt(now);
             lobby.setReadyAt(now.plus(START_DELAY));

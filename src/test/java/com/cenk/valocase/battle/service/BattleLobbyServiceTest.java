@@ -2,8 +2,11 @@ package com.cenk.valocase.battle.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -394,5 +397,154 @@ class BattleLobbyServiceTest {
 
         assertEquals(1, out.size());
         assertEquals(joined.getId().toString(), out.get(0).battleId());
+    }
+
+    private BattleLobby startingLobby(int rounds) {
+        BattleLobby lobby = new BattleLobby();
+        lobby.setId(LOBBY);
+        lobby.setCreatorAccountId(CREATOR);
+        lobby.setCaseId(CASE_ID);
+        lobby.setRounds(rounds);
+        lobby.setMaxSlots(2);
+        lobby.setEntryCost(200L);
+        lobby.setStatus(LobbyStatus.STARTING);
+        lobby.setCreatedAt(Instant.now().minus(30, ChronoUnit.SECONDS));
+        lobby.setReadyAt(Instant.now().minus(1, ChronoUnit.SECONDS));
+        return lobby;
+    }
+
+    private void stubResolve() {
+        when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(100)));
+        when(caseEntryRepository.findByCaseIdOrderBySkinIdAsc(CASE_ID)).thenReturn(List.of(entry()));
+        when(skinRepository.findAllById(any())).thenReturn(List.of(skin()));
+        when(dropSelector.selectWeighted(any())).thenReturn(entry());
+        when(battleRepository.saveAndFlush(any(Battle.class))).thenAnswer(inv -> {
+            Battle b = inv.getArgument(0);
+            b.setId(UUID.randomUUID());
+            return b;
+        });
+        when(battleParticipantRepository.findByBattleIdOrderByParticipantIndexAsc(any())).thenReturn(List.of());
+        when(battleRollRepository.findByBattleId(any())).thenReturn(List.of());
+        when(inventoryService.addItem(eq(CREATOR), eq("skin_a"), any(), any())).thenAnswer(inv -> {
+            InventoryItem item = new InventoryItem();
+            item.setId(UUID.randomUUID());
+            return item;
+        });
+        when(accountRepository.findById(CREATOR)).thenReturn(Optional.of(account(CREATOR, 1)));
+        when(accountRepository.findById(JOINER)).thenReturn(Optional.of(account(JOINER, 1)));
+    }
+
+    @Test
+    void pvpCompletion_grantsFiveXpPerRealPlayer_regardlessOfRounds() {
+        BattleLobby lobby = startingLobby(5);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(
+                slot(0, SlotType.REAL, CREATOR, true),
+                slot(1, SlotType.REAL, JOINER, false)));
+        stubResolve();
+        when(battleResolver.winningIndex(any())).thenReturn(0);
+
+        service.getLobby(CREATOR, LOBBY);
+
+        verify(progressionService).grantCaseOpenXp(argThat(a -> CREATOR.equals(a.getId())), eq(5));
+        verify(progressionService).grantCaseOpenXp(argThat(a -> JOINER.equals(a.getId())), eq(5));
+    }
+
+    @Test
+    void repeatedPolling_doesNotGrantXpTwice() {
+        BattleLobby lobby = startingLobby(2);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(
+                slot(0, SlotType.REAL, CREATOR, true),
+                slot(1, SlotType.REAL, JOINER, false)));
+        stubResolve();
+        when(battleResolver.winningIndex(any())).thenReturn(0);
+
+        service.getLobby(CREATOR, LOBBY);
+        service.getLobby(CREATOR, LOBBY);
+
+        verify(progressionService, times(2)).grantCaseOpenXp(any(), eq(5));
+    }
+
+    @Test
+    void loserReceivesNoWinnerRewards() {
+        BattleLobby lobby = startingLobby(2);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(
+                slot(0, SlotType.REAL, CREATOR, true),
+                slot(1, SlotType.REAL, JOINER, false)));
+        stubResolve();
+        when(battleResolver.winningIndex(any())).thenReturn(0);
+
+        service.getLobby(CREATOR, LOBBY);
+
+        verify(inventoryService, times(4)).addItem(eq(CREATOR), eq("skin_a"), any(), any());
+        verify(inventoryService, never()).addItem(eq(JOINER), any(), any(), any());
+    }
+
+    @Test
+    void repeatedPoll_doesNotDuplicateInventory() {
+        BattleLobby lobby = startingLobby(2);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(
+                slot(0, SlotType.REAL, CREATOR, true),
+                slot(1, SlotType.REAL, JOINER, false)));
+        stubResolve();
+        when(battleResolver.winningIndex(any())).thenReturn(0);
+
+        service.getLobby(CREATOR, LOBBY);
+        service.getLobby(CREATOR, LOBBY);
+
+        verify(inventoryService, times(4)).addItem(eq(CREATOR), eq("skin_a"), any(), any());
+    }
+
+    @Test
+    void completedLobby_excludedFromActiveList() {
+        when(lobbyRepository.findByStatusOrderByCreatedAtDesc(LobbyStatus.WAITING)).thenReturn(List.of());
+
+        assertTrue(service.listOpenLobbies().isEmpty());
+        verify(lobbyRepository).findByStatusOrderByCreatedAtDesc(LobbyStatus.WAITING);
+    }
+
+    @Test
+    void completedLobby_cannotJoin() {
+        BattleLobby lobby = startingLobby(2);
+        lobby.setStatus(LobbyStatus.COMPLETED);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+
+        ApiException ex = assertThrows(ApiException.class, () -> service.joinLobby(JOINER, LOBBY));
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+        verify(walletService, never()).debit(any(), anyLong(), any(), any());
+    }
+
+    @Test
+    void completedLobby_cannotAddBot() {
+        BattleLobby lobby = startingLobby(2);
+        lobby.setStatus(LobbyStatus.COMPLETED);
+        lobby.setCreatedAt(Instant.now().minus(1, ChronoUnit.MINUTES));
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+
+        ApiException ex = assertThrows(ApiException.class, () -> service.addBot(CREATOR, LOBBY));
+        assertEquals(HttpStatus.CONFLICT, ex.getStatus());
+    }
+
+    @Test
+    void cancelledLobby_grantsNoXp() {
+        BattleLobby lobby = new BattleLobby();
+        lobby.setId(LOBBY);
+        lobby.setCreatorAccountId(CREATOR);
+        lobby.setStatus(LobbyStatus.WAITING);
+        lobby.setCreatedAt(Instant.now().minus(10, ChronoUnit.MINUTES));
+
+        BattleLobbySlot creatorSlot = slot(0, SlotType.REAL, CREATOR, true);
+        creatorSlot.setChargedVp(200L);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY))
+                .thenReturn(List.of(creatorSlot, slot(1, SlotType.EMPTY, null, false)));
+
+        service.cancelStaleLobby(LOBBY);
+
+        assertEquals(LobbyStatus.CANCELLED, lobby.getStatus());
+        verify(progressionService, never()).grantCaseOpenXp(any(), anyInt());
     }
 }
