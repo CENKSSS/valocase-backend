@@ -21,6 +21,7 @@ public record LobbyResponse(
         LobbyCreatorResponse creator,
         String caseId,
         String caseName,
+        List<CaseSelectionResponse> caseSelections,
         int rounds,
         long entryCost,
         int maxSlots,

@@ -42,10 +42,10 @@ public class BattleLobbyController {
         Account account = accountService.requireAccountByToken(guestToken);
         if (request == null) {
             throw new ApiException(HttpStatus.BAD_REQUEST,
-                    "Request body with caseId, rounds and maxSlots is required");
+                    "Request body with caseSelections (or legacy caseId + rounds) and maxSlots is required");
         }
         return lobbyService.createLobby(
-                account.getId(), request.caseId(), request.rounds(), request.maxSlots());
+                account.getId(), request.normalizedSelections(), request.maxSlots());
     }
 
     /** Lists every public, still-waiting lobby. */

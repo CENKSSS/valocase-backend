@@ -37,7 +37,9 @@ import com.cenk.valocase.battle.domain.BattleLobby;
 import com.cenk.valocase.battle.domain.BattleLobbySlot;
 import com.cenk.valocase.battle.domain.LobbyStatus;
 import com.cenk.valocase.battle.domain.SlotType;
+import com.cenk.valocase.battle.dto.CaseSelectionRequest;
 import com.cenk.valocase.battle.dto.LobbyResponse;
+import com.cenk.valocase.battle.repository.BattleLobbyCaseRepository;
 import com.cenk.valocase.battle.repository.BattleLobbyRepository;
 import com.cenk.valocase.battle.repository.BattleLobbySlotRepository;
 import com.cenk.valocase.battle.repository.BattleParticipantRepository;
@@ -74,6 +76,7 @@ class BattleLobbyServiceTest {
     @Mock private BattleParticipantRepository battleParticipantRepository;
     @Mock private BattleRollRepository battleRollRepository;
     @Mock private BattleLobbyRepository lobbyRepository;
+    @Mock private BattleLobbyCaseRepository lobbyCaseRepository;
     @Mock private BattleLobbySlotRepository slotRepository;
     @Mock private AccountRepository accountRepository;
     @Mock private ProgressionService progressionService;
@@ -152,7 +155,7 @@ class BattleLobbyServiceTest {
         stubLobbySave();
         when(walletService.debit(eq(CREATOR), eq(200L), any(), any())).thenReturn(new Wallet());
 
-        LobbyResponse res = service.createLobby(CREATOR, CASE_ID, 2, 2);
+        LobbyResponse res = service.createLobby(CREATOR, List.of(new CaseSelectionRequest(CASE_ID, 2)), 2);
 
         assertEquals(LobbyStatus.WAITING.name(), res.status());
         assertEquals(200L, res.entryCost()); // price 100 x 2 rounds
@@ -168,9 +171,97 @@ class BattleLobbyServiceTest {
         when(accountRepository.findById(CREATOR)).thenReturn(Optional.of(account(CREATOR, 1)));
         when(progressionService.isCategoryUnlocked(eq(1), any(CaseCategory.class))).thenReturn(false);
 
-        assertThrows(CategoryLockedException.class, () -> service.createLobby(CREATOR, CASE_ID, 2, 2));
+        assertThrows(CategoryLockedException.class,
+                () -> service.createLobby(CREATOR, List.of(new CaseSelectionRequest(CASE_ID, 2)), 2));
         verify(walletService, never()).debit(any(), anyLong(), any(), any());
         verify(lobbyRepository, never()).saveAndFlush(any());
+    }
+
+    private static CaseDefinition caseDef(String id, int price) {
+        CaseDefinition c = new CaseDefinition();
+        c.setId(id);
+        c.setDisplayName(id);
+        c.setPriceVp(price);
+        c.setActive(true);
+        return c;
+    }
+
+    @Test
+    void create_multiCase_sumsEntryCostAndRounds() {
+        when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(100)));
+        when(caseDefinitionRepository.findById("ghost_basic")).thenReturn(Optional.of(caseDef("ghost_basic", 50)));
+        when(accountRepository.findById(CREATOR)).thenReturn(Optional.of(account(CREATOR, 50)));
+        when(progressionService.isCategoryUnlocked(eq(50), any(CaseCategory.class))).thenReturn(true);
+        stubLobbySave();
+        when(walletService.debit(eq(CREATOR), anyLong(), any(), any())).thenReturn(new Wallet());
+
+        LobbyResponse res = service.createLobby(CREATOR,
+                List.of(new CaseSelectionRequest(CASE_ID, 3), new CaseSelectionRequest("ghost_basic", 2)), 2);
+
+        assertEquals(400L, res.entryCost()); // 100x3 + 50x2
+        assertEquals(5, res.rounds());       // 3 + 2 openings
+        assertEquals(2, res.caseSelections().size());
+        verify(walletService).debit(eq(CREATOR), eq(400L), any(), eq(LOBBY));
+    }
+
+    @Test
+    void create_noCases_rejected() {
+        ApiException ex = assertThrows(ApiException.class,
+                () -> service.createLobby(CREATOR, List.of(), 2));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        verify(lobbyRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void create_tooManyCases_rejected() {
+        List<CaseSelectionRequest> five = List.of(
+                new CaseSelectionRequest("c1", 1), new CaseSelectionRequest("c2", 1),
+                new CaseSelectionRequest("c3", 1), new CaseSelectionRequest("c4", 1),
+                new CaseSelectionRequest("c5", 1));
+
+        ApiException ex = assertThrows(ApiException.class, () -> service.createLobby(CREATOR, five, 2));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        verify(lobbyRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void create_quantityOutOfRange_rejected() {
+        when(accountRepository.findById(CREATOR)).thenReturn(Optional.of(account(CREATOR, 50)));
+
+        ApiException ex = assertThrows(ApiException.class,
+                () -> service.createLobby(CREATOR, List.of(new CaseSelectionRequest(CASE_ID, 6)), 2));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        verify(walletService, never()).debit(any(), anyLong(), any(), any());
+        verify(lobbyRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void create_duplicateCases_rejected() {
+        when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(100)));
+        when(accountRepository.findById(CREATOR)).thenReturn(Optional.of(account(CREATOR, 50)));
+        when(progressionService.isCategoryUnlocked(eq(50), any(CaseCategory.class))).thenReturn(true);
+
+        ApiException ex = assertThrows(ApiException.class, () -> service.createLobby(CREATOR,
+                List.of(new CaseSelectionRequest(CASE_ID, 1), new CaseSelectionRequest(CASE_ID, 2)), 2));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        verify(lobbyRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void join_doesNotLevelLockJoiner() {
+        BattleLobby lobby = waitingLobby(3);
+        BattleLobbySlot empty = slot(1, SlotType.EMPTY, null, false);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(accountRepository.findById(JOINER)).thenReturn(Optional.of(account(JOINER, 1)));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(
+                slot(0, SlotType.REAL, CREATOR, true), empty, slot(2, SlotType.EMPTY, null, false)));
+        when(walletService.debit(eq(JOINER), eq(200L), any(), eq(LOBBY))).thenReturn(new Wallet());
+
+        service.joinLobby(JOINER, LOBBY, 1);
+
+        assertEquals(SlotType.REAL, empty.getSlotType());
+        assertEquals(JOINER, empty.getAccountId());
+        verify(progressionService, never()).isCategoryUnlocked(anyInt(), any(CaseCategory.class));
     }
 
     @Test

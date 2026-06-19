@@ -19,15 +19,19 @@ import com.cenk.valocase.account.domain.Account;
 import com.cenk.valocase.account.repository.AccountRepository;
 import com.cenk.valocase.battle.domain.Battle;
 import com.cenk.valocase.battle.domain.BattleLobby;
+import com.cenk.valocase.battle.domain.BattleLobbyCase;
 import com.cenk.valocase.battle.domain.BattleLobbySlot;
 import com.cenk.valocase.battle.domain.BattleParticipant;
 import com.cenk.valocase.battle.domain.BattleRoll;
 import com.cenk.valocase.battle.domain.LobbyStatus;
 import com.cenk.valocase.battle.domain.SlotType;
+import com.cenk.valocase.battle.dto.CaseSelectionRequest;
+import com.cenk.valocase.battle.dto.CaseSelectionResponse;
 import com.cenk.valocase.battle.dto.LobbyCreatorResponse;
 import com.cenk.valocase.battle.dto.LobbyResponse;
 import com.cenk.valocase.battle.dto.LobbySlotResponse;
 import com.cenk.valocase.battle.dto.RolledSkinResponse;
+import com.cenk.valocase.battle.repository.BattleLobbyCaseRepository;
 import com.cenk.valocase.battle.repository.BattleLobbyRepository;
 import com.cenk.valocase.battle.repository.BattleLobbySlotRepository;
 import com.cenk.valocase.battle.repository.BattleParticipantRepository;
@@ -95,6 +99,9 @@ public class BattleLobbyService {
      */
     public static final Duration CONNECTION_TIMEOUT = Duration.ofSeconds(15);
 
+    /** A lobby may select at most this many distinct cases. */
+    public static final int MAX_CASE_TYPES = 4;
+
     private final CaseDefinitionRepository caseDefinitionRepository;
     private final CaseEntryRepository caseEntryRepository;
     private final SkinRepository skinRepository;
@@ -106,6 +113,7 @@ public class BattleLobbyService {
     private final BattleParticipantRepository battleParticipantRepository;
     private final BattleRollRepository battleRollRepository;
     private final BattleLobbyRepository lobbyRepository;
+    private final BattleLobbyCaseRepository lobbyCaseRepository;
     private final BattleLobbySlotRepository slotRepository;
     private final AccountRepository accountRepository;
     private final ProgressionService progressionService;
@@ -114,37 +122,74 @@ public class BattleLobbyService {
     // --- Create ----------------------------------------------------------------
 
     @Transactional
-    public LobbyResponse createLobby(UUID accountId, String caseId, int rounds, int maxSlots) {
-        if (rounds < BotBattleService.ROUNDS_MIN || rounds > BotBattleService.ROUNDS_MAX) {
-            throw new ApiException(HttpStatus.BAD_REQUEST,
-                    "rounds must be between " + BotBattleService.ROUNDS_MIN + " and " + BotBattleService.ROUNDS_MAX);
-        }
-        if (maxSlots < BotBattleService.PARTICIPANTS_MIN || maxSlots > BotBattleService.PARTICIPANTS_MAX) {
+    public LobbyResponse createLobby(UUID accountId, List<CaseSelectionRequest> selections, Integer maxSlots) {
+        if (maxSlots == null
+                || maxSlots < BotBattleService.PARTICIPANTS_MIN || maxSlots > BotBattleService.PARTICIPANTS_MAX) {
             throw new ApiException(HttpStatus.BAD_REQUEST,
                     "maxSlots must be between " + BotBattleService.PARTICIPANTS_MIN
                             + " and " + BotBattleService.PARTICIPANTS_MAX);
         }
-        if (caseId == null || caseId.isBlank()) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "caseId is required");
+        if (selections == null || selections.isEmpty()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "At least one case must be selected");
+        }
+        if (selections.size() > MAX_CASE_TYPES) {
+            throw new ApiException(HttpStatus.BAD_REQUEST,
+                    "At most " + MAX_CASE_TYPES + " different cases can be selected");
         }
 
-        CaseDefinition caseDef = requireActiveCase(caseId);
         Account creator = requireAccount(accountId);
-        // Level-lock BEFORE any charge: a locked case never mutates state.
-        requireCategoryUnlocked(caseId, creator.getLevel());
 
-        long entryCost = (long) caseDef.getPriceVp() * rounds;
+        // Validate every selection and resolve its case BEFORE any charge: a
+        // locked / missing / invalid case never mutates state.
+        Map<String, CaseDefinition> caseById = new java.util.LinkedHashMap<>();
+        long entryCost = 0;
+        int totalRounds = 0;
+        for (CaseSelectionRequest selection : selections) {
+            String caseId = selection.caseId();
+            Integer quantity = selection.quantity();
+            if (caseId == null || caseId.isBlank()) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "caseId is required for every selection");
+            }
+            if (quantity == null
+                    || quantity < BotBattleService.ROUNDS_MIN || quantity > BotBattleService.ROUNDS_MAX) {
+                throw new ApiException(HttpStatus.BAD_REQUEST,
+                        "quantity must be between " + BotBattleService.ROUNDS_MIN
+                                + " and " + BotBattleService.ROUNDS_MAX + " for case " + caseId);
+            }
+            if (caseById.containsKey(caseId)) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "Duplicate case selected: " + caseId);
+            }
+            CaseDefinition caseDef = requireActiveCase(caseId);
+            requireCategoryUnlocked(caseId, creator.getLevel());
+            caseById.put(caseId, caseDef);
+            entryCost += (long) caseDef.getPriceVp() * quantity;
+            totalRounds += quantity;
+        }
+
+        String primaryCaseId = selections.get(0).caseId();
 
         BattleLobby lobby = new BattleLobby();
         lobby.setCreatorAccountId(accountId);
-        lobby.setCaseId(caseId);
-        lobby.setRounds(rounds);
+        lobby.setCaseId(primaryCaseId);
+        lobby.setRounds(totalRounds);
         lobby.setMaxSlots(maxSlots);
         lobby.setEntryCost(entryCost);
         lobby.setStatus(LobbyStatus.WAITING);
         lobby.setCreatedAt(Instant.now());
         lobby = lobbyRepository.saveAndFlush(lobby);
         UUID lobbyId = lobby.getId();
+
+        List<BattleLobbyCase> lobbyCases = new ArrayList<>(selections.size());
+        for (int i = 0; i < selections.size(); i++) {
+            CaseSelectionRequest selection = selections.get(i);
+            BattleLobbyCase lobbyCase = new BattleLobbyCase();
+            lobbyCase.setLobbyId(lobbyId);
+            lobbyCase.setOrdinal(i);
+            lobbyCase.setCaseId(selection.caseId());
+            lobbyCase.setQuantity(selection.quantity());
+            lobbyCases.add(lobbyCase);
+        }
+        lobbyCaseRepository.saveAll(lobbyCases);
 
         // Slot 0 = creator (real); the rest start empty.
         List<BattleLobbySlot> slots = new ArrayList<>(maxSlots);
@@ -175,9 +220,7 @@ public class BattleLobbyService {
             walletService.debit(accountId, entryCost, REASON_LOBBY_ENTRY, lobbyId);
         }
 
-        log.info("LOBBY_DEBUG create: creator={} lobbyId={} caseId={} status={} createdAt={}",
-                accountId, lobbyId, caseId, lobby.getStatus(), lobby.getCreatedAt());
-        return mapLobby(lobby, slots, caseDef, accountId);
+        return mapLobby(lobby, slots, lobbyCases, caseById, accountId);
     }
 
     // --- List ------------------------------------------------------------------
@@ -191,8 +234,15 @@ public class BattleLobbyService {
             return List.of();
         }
         Instant expiryCutoff = Instant.now().minus(LOBBY_TIMEOUT);
+        Map<UUID, List<BattleLobbyCase>> casesByLobby = lobbyCaseRepository
+                .findByLobbyIdInOrderByOrdinalAsc(lobbies.stream().map(BattleLobby::getId).toList())
+                .stream().collect(Collectors.groupingBy(BattleLobbyCase::getLobbyId));
+
+        List<String> caseIds = new ArrayList<>();
+        lobbies.forEach(l -> caseIds.add(l.getCaseId()));
+        casesByLobby.values().forEach(list -> list.forEach(c -> caseIds.add(c.getCaseId())));
         Map<String, CaseDefinition> caseById = caseDefinitionRepository
-                .findAllById(lobbies.stream().map(BattleLobby::getCaseId).distinct().toList())
+                .findAllById(caseIds.stream().distinct().toList())
                 .stream().collect(Collectors.toMap(CaseDefinition::getId, Function.identity()));
 
         List<LobbyResponse> out = new ArrayList<>(lobbies.size());
@@ -203,7 +253,8 @@ public class BattleLobbyService {
                 continue;
             }
             List<BattleLobbySlot> slots = slotRepository.findByLobbyIdOrderBySlotIndexAsc(lobby.getId());
-            out.add(mapLobby(lobby, slots, caseById.get(lobby.getCaseId()), viewerAccountId));
+            List<BattleLobbyCase> lobbyCases = casesByLobby.getOrDefault(lobby.getId(), List.of());
+            out.add(mapLobby(lobby, slots, lobbyCases, caseById, viewerAccountId));
         }
         log.info("LOBBY_DEBUG list: viewer={} returned={}", viewerAccountId, out.size());
         return out;
@@ -239,7 +290,7 @@ public class BattleLobbyService {
             resolve(lobby, slots);
         }
 
-        return mapLobby(lobby, slots, caseDefinitionRepository.findById(lobby.getCaseId()).orElse(null), viewerAccountId);
+        return mapLobby(lobby, slots, viewerAccountId);
     }
 
     // --- Join ------------------------------------------------------------------
@@ -258,8 +309,9 @@ public class BattleLobbyService {
             throw new ApiException(HttpStatus.CONFLICT, "You have already joined this lobby");
         }
 
+        // Joining is intentionally NOT level-locked: only the creator's level
+        // controls which cases a lobby may use. Anyone can join an open lobby.
         Account joiner = requireAccount(accountId);
-        requireCategoryUnlocked(lobby.getCaseId(), joiner.getLevel());
 
         List<BattleLobbySlot> slots = slotRepository.findByLobbyIdOrderBySlotIndexAsc(lobbyId);
         BattleLobbySlot target = slots.stream()
@@ -283,7 +335,7 @@ public class BattleLobbyService {
         slotRepository.save(target);
 
         markStartingIfFull(lobby, slots);
-        return mapLobby(lobby, slots, caseDefinitionRepository.findById(lobby.getCaseId()).orElse(null), accountId);
+        return mapLobby(lobby, slots, accountId);
     }
 
     // --- Leave (only while WAITING; frees the slot and refunds once) -----------
@@ -302,7 +354,7 @@ public class BattleLobbyService {
                 .findFirst()
                 .orElse(null);
         if (seat == null) {
-            return mapLobby(lobby, slots, caseDefinitionRepository.findById(lobby.getCaseId()).orElse(null), accountId);
+            return mapLobby(lobby, slots, accountId);
         }
         if (seat.isCreator()) {
             throw new ApiException(HttpStatus.CONFLICT, "The host cannot leave; the lobby expires if it never starts");
@@ -318,7 +370,7 @@ public class BattleLobbyService {
         seat.setLastSeenAt(null);
         slotRepository.save(seat);
 
-        return mapLobby(lobby, slots, caseDefinitionRepository.findById(lobby.getCaseId()).orElse(null), accountId);
+        return mapLobby(lobby, slots, accountId);
     }
 
     // --- Add Bot ---------------------------------------------------------------
@@ -349,7 +401,7 @@ public class BattleLobbyService {
         slotRepository.save(target);
 
         markStartingIfFull(lobby, slots);
-        return mapLobby(lobby, slots, caseDefinitionRepository.findById(lobby.getCaseId()).orElse(null), accountId);
+        return mapLobby(lobby, slots, accountId);
     }
 
     // --- Maintenance: expiry cleanup + fallback start --------------------------
@@ -430,21 +482,28 @@ public class BattleLobbyService {
         if (lobby.getStatus() == LobbyStatus.COMPLETED) {
             return; // already resolved; result is immutable
         }
-        requireActiveCase(lobby.getCaseId());
-        List<CaseEntry> candidates = loadCandidates(lobby.getCaseId());
-
+        // Ordered openings across every selected case (caseId repeated by quantity).
+        List<String> openings = resolveOpenings(lobby);
+        Map<String, List<CaseEntry>> candidatesByCase = new java.util.HashMap<>();
+        java.util.Set<String> allSkinIds = new java.util.LinkedHashSet<>();
+        for (String caseId : openings.stream().distinct().toList()) {
+            requireActiveCase(caseId);
+            List<CaseEntry> candidates = loadCandidates(caseId);
+            candidatesByCase.put(caseId, candidates);
+            candidates.forEach(e -> allSkinIds.add(e.getSkinId()));
+        }
         Map<String, Skin> skinsById = skinRepository
-                .findAllById(candidates.stream().map(CaseEntry::getSkinId).distinct().toList())
+                .findAllById(allSkinIds)
                 .stream().collect(Collectors.toMap(Skin::getId, Function.identity()));
 
         int n = lobby.getMaxSlots();
-        int rounds = lobby.getRounds();
+        int rounds = openings.size();
         long[] totals = new long[n];
         List<List<Skin>> rolledByParticipant = new ArrayList<>(n);
         for (int p = 0; p < n; p++) {
             List<Skin> rolls = new ArrayList<>(rounds);
-            for (int r = 0; r < rounds; r++) {
-                CaseEntry entry = dropSelector.selectWeighted(candidates);
+            for (String caseId : openings) {
+                CaseEntry entry = dropSelector.selectWeighted(candidatesByCase.get(caseId));
                 Skin skin = skinsById.get(entry.getSkinId());
                 rolls.add(skin);
                 totals[p] += skin.getVpValue();
@@ -608,10 +667,38 @@ public class BattleLobbyService {
                 .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Account not found: " + accountId));
     }
 
+    /** Ordered case ids opened per participant (each case repeated by its quantity). */
+    private List<String> resolveOpenings(BattleLobby lobby) {
+        List<BattleLobbyCase> selections = lobbyCaseRepository.findByLobbyIdOrderByOrdinalAsc(lobby.getId());
+        List<String> openings = new ArrayList<>();
+        if (selections.isEmpty()) {
+            for (int i = 0; i < lobby.getRounds(); i++) {
+                openings.add(lobby.getCaseId());
+            }
+        } else {
+            for (BattleLobbyCase selection : selections) {
+                for (int i = 0; i < selection.getQuantity(); i++) {
+                    openings.add(selection.getCaseId());
+                }
+            }
+        }
+        return openings;
+    }
+
     // --- Mapping ---------------------------------------------------------------
 
-    private LobbyResponse mapLobby(BattleLobby lobby, List<BattleLobbySlot> slots, CaseDefinition caseDef,
-            UUID viewerAccountId) {
+    private LobbyResponse mapLobby(BattleLobby lobby, List<BattleLobbySlot> slots, UUID viewerAccountId) {
+        List<BattleLobbyCase> lobbyCases = lobbyCaseRepository.findByLobbyIdOrderByOrdinalAsc(lobby.getId());
+        java.util.Set<String> ids = new java.util.LinkedHashSet<>();
+        ids.add(lobby.getCaseId());
+        lobbyCases.forEach(c -> ids.add(c.getCaseId()));
+        Map<String, CaseDefinition> caseById = caseDefinitionRepository.findAllById(ids).stream()
+                .collect(Collectors.toMap(CaseDefinition::getId, Function.identity()));
+        return mapLobby(lobby, slots, lobbyCases, caseById, viewerAccountId);
+    }
+
+    private LobbyResponse mapLobby(BattleLobby lobby, List<BattleLobbySlot> slots,
+            List<BattleLobbyCase> lobbyCases, Map<String, CaseDefinition> caseById, UUID viewerAccountId) {
         Instant now = Instant.now();
         Instant addBotAt = addBotAvailableAt(lobby);
         boolean viewerIsHost = lobby.getCreatorAccountId().equals(viewerAccountId);
@@ -670,12 +757,16 @@ public class BattleLobbyService {
                 .map(BattleLobbySlot::getDisplayName)
                 .orElse(null);
 
+        List<CaseSelectionResponse> caseSelections = buildCaseSelections(lobby, lobbyCases, caseById);
+        CaseDefinition primaryCase = caseById.get(lobby.getCaseId());
+
         return new LobbyResponse(
                 lobby.getId().toString(),
                 lobby.getStatus().name(),
                 new LobbyCreatorResponse(lobby.getCreatorAccountId().toString(), creatorDisplayName),
                 lobby.getCaseId(),
-                caseDef != null ? caseDef.getDisplayName() : null,
+                primaryCase != null ? primaryCase.getDisplayName() : null,
+                caseSelections,
                 lobby.getRounds(),
                 lobby.getEntryCost(),
                 lobby.getMaxSlots(),
@@ -689,6 +780,28 @@ public class BattleLobbyService {
                 winnerDisplayName,
                 winnerRewarded
         );
+    }
+
+    private List<CaseSelectionResponse> buildCaseSelections(BattleLobby lobby,
+            List<BattleLobbyCase> lobbyCases, Map<String, CaseDefinition> caseById) {
+        if (lobbyCases.isEmpty()) {
+            CaseDefinition cd = caseById.get(lobby.getCaseId());
+            return List.of(new CaseSelectionResponse(
+                    lobby.getCaseId(),
+                    cd != null ? cd.getDisplayName() : null,
+                    lobby.getRounds(),
+                    cd != null ? cd.getPriceVp() : 0L));
+        }
+        return lobbyCases.stream()
+                .map(lc -> {
+                    CaseDefinition cd = caseById.get(lc.getCaseId());
+                    return new CaseSelectionResponse(
+                            lc.getCaseId(),
+                            cd != null ? cd.getDisplayName() : null,
+                            lc.getQuantity(),
+                            cd != null ? cd.getPriceVp() : 0L);
+                })
+                .toList();
     }
 
     private Map<Integer, List<RolledSkinResponse>> buildRollsByIndex(List<BattleRoll> rolls) {
