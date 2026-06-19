@@ -10,11 +10,14 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import com.cenk.valocase.progression.CategoryLockedException;
 import com.cenk.valocase.progression.dto.CategoryLockedErrorResponse;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * Translates exceptions into a consistent {@link ErrorResponse} JSON body.
  * Kept intentionally small for Phase 1 foundation.
  */
 @RestControllerAdvice
+@Slf4j
 public class GlobalExceptionHandler {
 
     @ExceptionHandler(CategoryLockedException.class)
@@ -38,6 +41,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleUnexpected(Exception ex) {
+        log.error("Unexpected server error", ex);
         return build(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected server error", null);
     }
 

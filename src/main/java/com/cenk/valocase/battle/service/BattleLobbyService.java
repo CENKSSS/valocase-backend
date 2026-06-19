@@ -51,6 +51,7 @@ import com.cenk.valocase.progression.service.ProgressionService;
 import com.cenk.valocase.wallet.service.WalletService;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Public online battle lobbies. Real players create and join lobbies; the
@@ -67,6 +68,7 @@ import lombok.RequiredArgsConstructor;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class BattleLobbyService {
 
     /** Wallet reason for a real player's lobby entry charge. */
@@ -173,6 +175,8 @@ public class BattleLobbyService {
             walletService.debit(accountId, entryCost, REASON_LOBBY_ENTRY, lobbyId);
         }
 
+        log.info("LOBBY_DEBUG create: creator={} lobbyId={} caseId={} status={} createdAt={}",
+                accountId, lobbyId, caseId, lobby.getStatus(), lobby.getCreatedAt());
         return mapLobby(lobby, slots, caseDef, accountId);
     }
 
@@ -181,6 +185,8 @@ public class BattleLobbyService {
     @Transactional(readOnly = true)
     public List<LobbyResponse> listOpenLobbies(UUID viewerAccountId) {
         List<BattleLobby> lobbies = lobbyRepository.findByStatusOrderByCreatedAtDesc(LobbyStatus.WAITING);
+        log.info("LOBBY_DEBUG list: viewer={} fetchedWaiting={} ids={}",
+                viewerAccountId, lobbies.size(), lobbies.stream().map(BattleLobby::getId).toList());
         if (lobbies.isEmpty()) {
             return List.of();
         }
@@ -192,11 +198,14 @@ public class BattleLobbyService {
         List<LobbyResponse> out = new ArrayList<>(lobbies.size());
         for (BattleLobby lobby : lobbies) {
             if (lobby.getCreatedAt().isBefore(expiryCutoff)) {
+                log.info("LOBBY_DEBUG list: skipping expired lobbyId={} createdAt={}",
+                        lobby.getId(), lobby.getCreatedAt());
                 continue;
             }
             List<BattleLobbySlot> slots = slotRepository.findByLobbyIdOrderBySlotIndexAsc(lobby.getId());
             out.add(mapLobby(lobby, slots, caseById.get(lobby.getCaseId()), viewerAccountId));
         }
+        log.info("LOBBY_DEBUG list: viewer={} returned={}", viewerAccountId, out.size());
         return out;
     }
 
@@ -367,6 +376,8 @@ public class BattleLobbyService {
         if (lobby.getCreatedAt().isAfter(Instant.now().minus(LOBBY_TIMEOUT))) {
             return;
         }
+        log.info("LOBBY_DEBUG scheduler cancel: lobbyId={} status={} createdAt={}",
+                lobbyId, lobby.getStatus(), lobby.getCreatedAt());
         List<BattleLobbySlot> slots = slotRepository.findByLobbyIdOrderBySlotIndexAsc(lobbyId);
         refundRealOccupants(lobby, slots);
     }
