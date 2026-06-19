@@ -4,7 +4,10 @@ import java.util.List;
 
 /**
  * Server-authoritative result of an upgrade. Input items are always consumed;
- * grantedInventoryItemId is set only on success, null on failure.
+ * targets are granted only on success (empty/null on failure).
+ *
+ * {@code targetSkinId} and {@code grantedInventoryItemId} hold the first target
+ * for backward compatibility; the full lists carry every selected target.
  */
 public record UpgradeResultResponse(
         String upgradeId,
@@ -12,6 +15,8 @@ public record UpgradeResultResponse(
         double chance,
         List<String> consumedItemIds,
         String targetSkinId,
-        String grantedInventoryItemId
+        List<String> targetSkinIds,
+        String grantedInventoryItemId,
+        List<String> grantedInventoryItemIds
 ) {
 }

@@ -9,6 +9,7 @@ public record ErrorResponse(
         Instant timestamp,
         int status,
         String error,
-        String message
+        String message,
+        String code
 ) {
 }

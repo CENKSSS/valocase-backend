@@ -1,5 +1,7 @@
 package com.cenk.valocase.upgrade.web;
 
+import java.util.List;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -35,8 +37,20 @@ public class UpgradeController {
             @RequestBody(required = false) UpgradeRequest request) {
         Account account = accountService.requireAccountByToken(guestToken);
         if (request == null) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "Request body with inputItemIds and targetSkinId is required");
+            throw new ApiException(HttpStatus.BAD_REQUEST,
+                    "Request body with inputItemIds and targetSkinIds is required");
         }
-        return upgradeService.upgrade(account.getId(), request.inputItemIds(), request.targetSkinId());
+        List<String> targetSkinIds = resolveTargetSkinIds(request);
+        return upgradeService.upgrade(account.getId(), request.inputItemIds(), targetSkinIds);
+    }
+
+    private static List<String> resolveTargetSkinIds(UpgradeRequest request) {
+        if (request.targetSkinIds() != null && !request.targetSkinIds().isEmpty()) {
+            return request.targetSkinIds();
+        }
+        if (request.targetSkinId() != null && !request.targetSkinId().isBlank()) {
+            return List.of(request.targetSkinId());
+        }
+        throw new ApiException(HttpStatus.BAD_REQUEST, "targetSkinIds must not be empty");
     }
 }

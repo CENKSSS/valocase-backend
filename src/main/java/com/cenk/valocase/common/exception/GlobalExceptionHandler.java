@@ -33,20 +33,21 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ErrorResponse> handleApiException(ApiException ex) {
-        return build(ex.getStatus(), ex.getMessage());
+        return build(ex.getStatus(), ex.getMessage(), ex.getCode());
     }
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleUnexpected(Exception ex) {
-        return build(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected server error");
+        return build(HttpStatus.INTERNAL_SERVER_ERROR, "Unexpected server error", null);
     }
 
-    private ResponseEntity<ErrorResponse> build(HttpStatus status, String message) {
+    private ResponseEntity<ErrorResponse> build(HttpStatus status, String message, String code) {
         ErrorResponse body = new ErrorResponse(
                 Instant.now(),
                 status.value(),
                 status.getReasonPhrase(),
-                message
+                message,
+                code
         );
         return ResponseEntity.status(status).body(body);
     }
