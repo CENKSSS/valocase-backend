@@ -103,24 +103,24 @@ class BotBattleServiceTest {
     @Test
     void invalidRounds_throws400() {
         ApiException ex = assertThrows(ApiException.class,
-                () -> service.createAndResolve(ACCOUNT, CASE_ID, 0, 2));
+                () -> service.createAndResolve(ACCOUNT, "Tester", CASE_ID, 0, 2));
         assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
     }
 
     @Test
     void tooManyRounds_throws400() {
         ApiException ex = assertThrows(ApiException.class,
-                () -> service.createAndResolve(ACCOUNT, CASE_ID, 6, 2));
+                () -> service.createAndResolve(ACCOUNT, "Tester", CASE_ID, 6, 2));
         assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
     }
 
     @Test
     void invalidParticipantCount_throws400() {
         ApiException ex = assertThrows(ApiException.class,
-                () -> service.createAndResolve(ACCOUNT, CASE_ID, 3, 1));
+                () -> service.createAndResolve(ACCOUNT, "Tester", CASE_ID, 3, 1));
         assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
         ApiException ex2 = assertThrows(ApiException.class,
-                () -> service.createAndResolve(ACCOUNT, CASE_ID, 3, 5));
+                () -> service.createAndResolve(ACCOUNT, "Tester", CASE_ID, 3, 5));
         assertEquals(HttpStatus.BAD_REQUEST, ex2.getStatus());
     }
 
@@ -128,7 +128,7 @@ class BotBattleServiceTest {
     void unknownCase_throws404() {
         when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.empty());
         ApiException ex = assertThrows(ApiException.class,
-                () -> service.createAndResolve(ACCOUNT, CASE_ID, 3, 2));
+                () -> service.createAndResolve(ACCOUNT, "Tester", CASE_ID, 3, 2));
         assertEquals(HttpStatus.NOT_FOUND, ex.getStatus());
     }
 
@@ -136,7 +136,7 @@ class BotBattleServiceTest {
     void inactiveCase_throws404() {
         when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(false, 100)));
         ApiException ex = assertThrows(ApiException.class,
-                () -> service.createAndResolve(ACCOUNT, CASE_ID, 3, 2));
+                () -> service.createAndResolve(ACCOUNT, "Tester", CASE_ID, 3, 2));
         assertEquals(HttpStatus.NOT_FOUND, ex.getStatus());
     }
 
@@ -145,7 +145,7 @@ class BotBattleServiceTest {
         when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(true, 100)));
         when(caseEntryRepository.findByCaseIdOrderBySkinIdAsc(CASE_ID)).thenReturn(List.of());
         ApiException ex = assertThrows(ApiException.class,
-                () -> service.createAndResolve(ACCOUNT, CASE_ID, 3, 2));
+                () -> service.createAndResolve(ACCOUNT, "Tester", CASE_ID, 3, 2));
         assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, ex.getStatus());
     }
 
@@ -155,7 +155,7 @@ class BotBattleServiceTest {
         when(caseEntryRepository.findByCaseIdOrderBySkinIdAsc(CASE_ID)).thenReturn(List.of(entry("skin_a")));
         when(skinRepository.findAllById(any())).thenReturn(List.of(skin("skin_a", 1000, false)));
         ApiException ex = assertThrows(ApiException.class,
-                () -> service.createAndResolve(ACCOUNT, CASE_ID, 3, 2));
+                () -> service.createAndResolve(ACCOUNT, "Tester", CASE_ID, 3, 2));
         assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, ex.getStatus());
     }
 
@@ -167,7 +167,7 @@ class BotBattleServiceTest {
                 .thenThrow(new InsufficientFundsException(50, 200));
 
         ApiException ex = assertThrows(ApiException.class,
-                () -> service.createAndResolve(ACCOUNT, CASE_ID, 2, 2));
+                () -> service.createAndResolve(ACCOUNT, "Tester", CASE_ID, 2, 2));
         assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, ex.getStatus());
         verify(inventoryService, never()).addItem(any(), any(), any(), any());
     }
@@ -187,7 +187,7 @@ class BotBattleServiceTest {
                 });
 
         // participantCount 2 x rounds 2 = 4 rolled skins, all granted on win.
-        BattleResultResponse result = service.createAndResolve(ACCOUNT, CASE_ID, 2, 2);
+        BattleResultResponse result = service.createAndResolve(ACCOUNT, "Tester", CASE_ID, 2, 2);
 
         assertTrue(result.userWon());
         assertEquals(0, result.winnerIndex());
@@ -207,7 +207,7 @@ class BotBattleServiceTest {
         wallet.setVpBalance(9800L);
         when(walletService.debit(eq(ACCOUNT), eq(200L), any(), any())).thenReturn(wallet);
 
-        BattleResultResponse result = service.createAndResolve(ACCOUNT, CASE_ID, 2, 2);
+        BattleResultResponse result = service.createAndResolve(ACCOUNT, "Tester", CASE_ID, 2, 2);
 
         assertFalse(result.userWon());
         assertEquals(1, result.winnerIndex());

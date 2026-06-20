@@ -38,7 +38,8 @@ public class BotBattleController {
             throw new ApiException(HttpStatus.BAD_REQUEST,
                     "Request body with caseId, rounds and participantCount is required");
         }
+        String userDisplayName = AccountService.resolveDisplayName(account.getDisplayName(), account.getId());
         return botBattleService.createAndResolve(
-                account.getId(), request.caseId(), request.rounds(), request.participantCount());
+                account.getId(), userDisplayName, request.caseId(), request.rounds(), request.participantCount());
     }
 }

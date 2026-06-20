@@ -69,7 +69,8 @@ public class BotBattleService {
     private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
-    public BattleResultResponse createAndResolve(UUID accountId, String caseId, int rounds, int participantCount) {
+    public BattleResultResponse createAndResolve(
+            UUID accountId, String userDisplayName, String caseId, int rounds, int participantCount) {
         // 1. Validate lobby parameters.
         if (rounds < ROUNDS_MIN || rounds > ROUNDS_MAX) {
             throw new ApiException(HttpStatus.BAD_REQUEST,
@@ -159,7 +160,7 @@ public class BotBattleService {
             participant.setBattleId(battleId);
             participant.setParticipantIndex(p);
             participant.setUser(p == 0);
-            participant.setName(p == 0 ? null : "Bot " + p);
+            participant.setName(p == 0 ? userDisplayName : "Bot " + p);
             participant.setTotalVp(totals[p]);
             participants.add(participant);
         }
@@ -202,7 +203,7 @@ public class BotBattleService {
                     .map(BotBattleService::toRolledSkin)
                     .toList();
             participantResponses.add(new BattleParticipantResponse(
-                    p, p == 0, p == 0 ? null : "Bot " + p, totals[p], roundSkins));
+                    p, p == 0, p == 0 ? userDisplayName : "Bot " + p, totals[p], roundSkins));
         }
 
         return new BattleResultResponse(

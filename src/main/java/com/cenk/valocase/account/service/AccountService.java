@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.cenk.valocase.account.domain.Account;
 import com.cenk.valocase.account.domain.AccountStatus;
+import com.cenk.valocase.account.dto.AccountProfileResponse;
 import com.cenk.valocase.account.dto.GuestRegisterResponse;
 import com.cenk.valocase.account.repository.AccountRepository;
 import com.cenk.valocase.common.exception.ApiException;
@@ -27,6 +28,9 @@ public class AccountService {
 
     /** Starting VP balance granted to every new guest. */
     public static final long STARTING_VP = 10_000L;
+
+    /** Maximum length of a player-chosen display name. */
+    public static final int DISPLAY_NAME_MAX_LENGTH = 20;
 
     private final AccountRepository accountRepository;
     private final WalletService walletService;
@@ -51,6 +55,36 @@ public class AccountService {
                 account.getStatus().name(),
                 wallet.getVpBalance()
         );
+    }
+
+    @Transactional
+    public AccountProfileResponse updateDisplayName(Account account, String rawDisplayName) {
+        if (rawDisplayName == null || rawDisplayName.isBlank()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "displayName is required");
+        }
+        String trimmed = rawDisplayName.trim();
+        if (trimmed.length() > DISPLAY_NAME_MAX_LENGTH) {
+            throw new ApiException(HttpStatus.BAD_REQUEST,
+                    "displayName must be at most " + DISPLAY_NAME_MAX_LENGTH + " characters");
+        }
+        account.setDisplayName(trimmed);
+        accountRepository.save(account);
+        return new AccountProfileResponse(account.getId().toString(), account.getDisplayName());
+    }
+
+    /**
+     * The name to show for a real player: their chosen display name, or a stable
+     * per-account fallback when none was set. Never returns null/blank.
+     */
+    public static String resolveDisplayName(String displayName, UUID accountId) {
+        if (displayName != null && !displayName.isBlank()) {
+            return displayName.trim();
+        }
+        if (accountId == null) {
+            return "Oyuncu";
+        }
+        String suffix = accountId.toString().replace("-", "").substring(0, 4).toUpperCase();
+        return "Agent " + suffix;
     }
 
     /**

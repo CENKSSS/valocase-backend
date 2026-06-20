@@ -17,6 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.cenk.valocase.account.domain.Account;
 import com.cenk.valocase.account.repository.AccountRepository;
+import com.cenk.valocase.account.service.AccountService;
 import com.cenk.valocase.battle.domain.Battle;
 import com.cenk.valocase.battle.domain.BattleLobby;
 import com.cenk.valocase.battle.domain.BattleLobbyCase;
@@ -535,7 +536,7 @@ public class BattleLobbyService {
             participant.setBattleId(battleId);
             participant.setParticipantIndex(p);
             participant.setUser(slot.getSlotType() == SlotType.REAL);
-            participant.setName(slot.getDisplayName());
+            participant.setName(slotDisplayName(slot));
             participant.setTotalVp(totals[p]);
             participants.add(participant);
         }
@@ -614,6 +615,14 @@ public class BattleLobbyService {
         return slots.stream()
                 .filter(s -> s.getSlotType() == SlotType.EMPTY)
                 .min(Comparator.comparingInt(BattleLobbySlot::getSlotIndex));
+    }
+
+    /** Display name shown to clients: real players fall back to a stable name, bots keep "Bot N". */
+    private static String slotDisplayName(BattleLobbySlot slot) {
+        if (slot.getSlotType() == SlotType.REAL) {
+            return AccountService.resolveDisplayName(slot.getDisplayName(), slot.getAccountId());
+        }
+        return slot.getDisplayName();
     }
 
     /** A real slot seen within the connection window counts as connected. */
@@ -737,11 +746,12 @@ public class BattleLobbyService {
             BattleParticipant participant = participantByIndex.get(slot.getSlotIndex());
             Long totalVp = participant != null ? participant.getTotalVp() : null;
             List<RolledSkinResponse> rounds = rollsByIndex.get(slot.getSlotIndex());
+            String slotDisplayName = slotDisplayName(slot);
             slotResponses.add(new LobbySlotResponse(
                     slot.getSlotIndex(),
                     slot.getSlotType().name(),
                     slot.getAccountId() != null ? slot.getAccountId().toString() : null,
-                    slot.getDisplayName(),
+                    slotDisplayName,
                     slot.isCreator(),
                     addBotAllowed,
                     connected,
@@ -749,14 +759,14 @@ public class BattleLobbyService {
                     rounds
             ));
             if (lobby.getWinnerSlotIndex() != null && lobby.getWinnerSlotIndex() == slot.getSlotIndex()) {
-                winnerDisplayName = slot.getDisplayName();
+                winnerDisplayName = slotDisplayName;
             }
         }
 
         String creatorDisplayName = slots.stream()
                 .filter(BattleLobbySlot::isCreator)
                 .findFirst()
-                .map(BattleLobbySlot::getDisplayName)
+                .map(BattleLobbyService::slotDisplayName)
                 .orElse(null);
 
         List<CaseSelectionResponse> caseSelections = buildCaseSelections(lobby, lobbyCases, caseById);
