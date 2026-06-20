@@ -214,12 +214,12 @@ class BattleLobbyServiceTest {
 
     @Test
     void create_tooManyCases_rejected() {
-        List<CaseSelectionRequest> five = List.of(
+        List<CaseSelectionRequest> six = List.of(
                 new CaseSelectionRequest("c1", 1), new CaseSelectionRequest("c2", 1),
                 new CaseSelectionRequest("c3", 1), new CaseSelectionRequest("c4", 1),
-                new CaseSelectionRequest("c5", 1));
+                new CaseSelectionRequest("c5", 1), new CaseSelectionRequest("c6", 1));
 
-        ApiException ex = assertThrows(ApiException.class, () -> service.createLobby(CREATOR, five, 2));
+        ApiException ex = assertThrows(ApiException.class, () -> service.createLobby(CREATOR, six, 2));
         assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
         verify(lobbyRepository, never()).saveAndFlush(any());
     }

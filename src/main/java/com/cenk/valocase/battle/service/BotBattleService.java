@@ -193,6 +193,7 @@ public class BotBattleService {
             }
             eventPublisher.publishEvent(new MissionProgressEvent(accountId, MissionEventTypes.BATTLE_WON, 1));
         }
+        eventPublisher.publishEvent(new MissionProgressEvent(accountId, MissionEventTypes.BATTLE_PLAYED, 1));
 
         // 10. Build the response from the in-memory rolls.
         List<BattleParticipantResponse> participantResponses = new ArrayList<>(participantCount);

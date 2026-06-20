@@ -99,6 +99,8 @@ public class InventoryService {
         long newBalance = creditAndGetBalance(accountId, vpGained, referenceId);
 
         eventPublisher.publishEvent(new MissionProgressEvent(accountId, MissionEventTypes.SKIN_SOLD, 1));
+        eventPublisher.publishEvent(new MissionProgressEvent(
+                accountId, MissionEventTypes.SKIN_SOLD_VALUE, clampToInt(vpGained)));
         return new SellOneResponse(skinId, vpGained, newBalance);
     }
 
@@ -147,7 +149,13 @@ public class InventoryService {
         long newBalance = creditAndGetBalance(accountId, total, null);
 
         eventPublisher.publishEvent(new MissionProgressEvent(accountId, MissionEventTypes.SKIN_SOLD, items.size()));
+        eventPublisher.publishEvent(new MissionProgressEvent(
+                accountId, MissionEventTypes.SKIN_SOLD_VALUE, clampToInt(total)));
         return new SellResultResponse(items.size(), total, newBalance);
+    }
+
+    private static int clampToInt(long value) {
+        return (int) Math.min(value, Integer.MAX_VALUE);
     }
 
     /** Credits VP (reusing WalletService) and returns the resulting balance. */

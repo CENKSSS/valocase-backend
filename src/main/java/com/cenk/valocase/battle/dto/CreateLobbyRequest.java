@@ -6,7 +6,7 @@ import java.util.List;
  * Request to create a public battle lobby. {@code maxSlots} is the participant
  * count (2 = 1v1, 3 = 1v1v1, 4 = 1v1v1v1).
  *
- * <p>Multi-case clients send {@code caseSelections} (1..4 cases, each quantity
+ * <p>Multi-case clients send {@code caseSelections} (1..5 cases, each quantity
  * 1..5). The legacy single-case shape ({@code caseId} + {@code rounds}) is still
  * accepted and is normalized to one selection of {@code caseId} x {@code rounds}.
  * The server always computes the entry cost; any client-sent cost is ignored.

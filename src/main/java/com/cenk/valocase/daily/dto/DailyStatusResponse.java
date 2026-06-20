@@ -1,16 +1,15 @@
 package com.cenk.valocase.daily.dto;
 
-import java.time.LocalDate;
+import java.time.Instant;
 
 /**
- * Daily reward status for the guest. All dates are UTC.
+ * Daily reward status for the guest.
  */
 public record DailyStatusResponse(
         boolean claimable,
-        int currentStreak,
-        long nextRewardVp,
-        LocalDate lastClaimDate,
-        LocalDate nextClaimDate,
+        long rewardVp,
+        Instant lastClaimAt,
+        Instant nextClaimAt,
         long secondsUntilNextClaim
 ) {
 }

@@ -1,14 +1,14 @@
 package com.cenk.valocase.daily.dto;
 
-import java.time.LocalDate;
+import java.time.Instant;
 
 /**
  * Result of claiming a daily reward.
  */
 public record DailyClaimResponse(
         long rewardVp,
-        int currentStreak,
         long newVpBalance,
-        LocalDate claimDate
+        Instant claimedAt,
+        Instant nextClaimAt
 ) {
 }

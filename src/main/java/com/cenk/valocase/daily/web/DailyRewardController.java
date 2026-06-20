@@ -22,7 +22,7 @@ public class DailyRewardController {
     private final AccountService accountService;
     private final DailyRewardService dailyRewardService;
 
-    /** Daily reward status (claimable, streak, next reward) for the guest. */
+    /** Daily reward status (claimable, reward, cooldown) for the guest. */
     @GetMapping("/daily")
     public DailyStatusResponse getDaily(
             @RequestHeader(value = "X-Guest-Token", required = false) String guestToken) {
@@ -30,7 +30,7 @@ public class DailyRewardController {
         return dailyRewardService.getStatus(account.getId());
     }
 
-    /** Claims today's daily reward (once per UTC day). */
+    /** Claims the daily reward (once per rolling 24h). */
     @PostMapping("/daily/claim")
     public DailyClaimResponse claimDaily(
             @RequestHeader(value = "X-Guest-Token", required = false) String guestToken) {

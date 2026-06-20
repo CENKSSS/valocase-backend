@@ -10,6 +10,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -19,6 +20,8 @@ import com.cenk.valocase.common.exception.ApiException;
 import com.cenk.valocase.earnvp.domain.EarnVpClaim;
 import com.cenk.valocase.earnvp.dto.EarnVpClaimResponse;
 import com.cenk.valocase.earnvp.repository.EarnVpClaimRepository;
+import com.cenk.valocase.mission.event.MissionEventTypes;
+import com.cenk.valocase.mission.event.MissionProgressEvent;
 import com.cenk.valocase.wallet.service.WalletService;
 
 import lombok.RequiredArgsConstructor;
@@ -56,6 +59,7 @@ public class EarnVpService {
 
     private final EarnVpClaimRepository earnVpClaimRepository;
     private final WalletService walletService;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public EarnVpClaimResponse claim(UUID accountId, Integer tapCount, Long sessionDurationMs,
@@ -98,6 +102,8 @@ public class EarnVpService {
         }
 
         long newBalance = walletService.credit(accountId, vpGranted, REASON_EARN_VP, claim.getId()).getVpBalance();
+        eventPublisher.publishEvent(new MissionProgressEvent(
+                accountId, MissionEventTypes.VP_EARNED, (int) Math.min(vpGranted, Integer.MAX_VALUE)));
         return new EarnVpClaimResponse(vpGranted, newBalance, acceptedTapCount, "OK");
     }
 

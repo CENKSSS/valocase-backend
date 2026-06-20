@@ -9,8 +9,8 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-import java.time.LocalDate;
-import java.time.ZoneOffset;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -25,6 +25,7 @@ import com.cenk.valocase.common.exception.ApiException;
 import com.cenk.valocase.daily.domain.DailyClaim;
 import com.cenk.valocase.daily.domain.DailyRewardState;
 import com.cenk.valocase.daily.dto.DailyClaimResponse;
+import com.cenk.valocase.daily.dto.DailyStatusResponse;
 import com.cenk.valocase.daily.repository.DailyClaimRepository;
 import com.cenk.valocase.daily.repository.DailyRewardStateRepository;
 import com.cenk.valocase.wallet.domain.Wallet;
@@ -41,16 +42,15 @@ class DailyRewardServiceTest {
 
     private static final UUID ACCOUNT = UUID.randomUUID();
 
-    private static DailyRewardState state(LocalDate lastClaim, int streak) {
+    private static DailyRewardState state(Instant lastClaimAt) {
         DailyRewardState s = new DailyRewardState();
         s.setAccountId(ACCOUNT);
-        s.setLastClaimDate(lastClaim);
-        s.setCurrentStreak(streak);
+        s.setLastClaimAt(lastClaimAt);
         return s;
     }
 
     private void stubClaimWrites(long balance) {
-        when(dailyClaimRepository.saveAndFlush(any(DailyClaim.class))).thenAnswer(inv -> {
+        when(dailyClaimRepository.save(any(DailyClaim.class))).thenAnswer(inv -> {
             DailyClaim c = inv.getArgument(0);
             c.setId(UUID.randomUUID());
             return c;
@@ -61,50 +61,56 @@ class DailyRewardServiceTest {
     }
 
     @Test
-    void firstClaim_grants100AndStreak1() {
+    void firstClaim_grants2000() {
         when(dailyRewardStateRepository.findForUpdate(ACCOUNT)).thenReturn(Optional.empty());
-        stubClaimWrites(10100L);
+        stubClaimWrites(12000L);
 
         DailyClaimResponse result = service.claim(ACCOUNT);
 
-        assertEquals(100L, result.rewardVp());
-        assertEquals(1, result.currentStreak());
-        assertEquals(10100L, result.newVpBalance());
+        assertEquals(2000L, result.rewardVp());
+        assertEquals(12000L, result.newVpBalance());
     }
 
     @Test
-    void duplicateClaimSameDay_throws409() {
-        LocalDate today = LocalDate.now(ZoneOffset.UTC);
-        when(dailyRewardStateRepository.findForUpdate(ACCOUNT)).thenReturn(Optional.of(state(today, 3)));
+    void claimWithinCooldown_throws409() {
+        when(dailyRewardStateRepository.findForUpdate(ACCOUNT))
+                .thenReturn(Optional.of(state(Instant.now().minus(Duration.ofHours(1)))));
 
         ApiException ex = assertThrows(ApiException.class, () -> service.claim(ACCOUNT));
         assertEquals(HttpStatus.CONFLICT, ex.getStatus());
-        verify(dailyClaimRepository, never()).saveAndFlush(any());
+        verify(dailyClaimRepository, never()).save(any());
         verify(walletService, never()).credit(any(), anyLong(), any(), any());
     }
 
     @Test
-    void consecutiveDay_incrementsStreak() {
-        LocalDate yesterday = LocalDate.now(ZoneOffset.UTC).minusDays(1);
-        when(dailyRewardStateRepository.findForUpdate(ACCOUNT)).thenReturn(Optional.of(state(yesterday, 3)));
+    void claimAfterCooldown_grants2000() {
+        when(dailyRewardStateRepository.findForUpdate(ACCOUNT))
+                .thenReturn(Optional.of(state(Instant.now().minus(Duration.ofHours(25)))));
         stubClaimWrites(99999L);
 
         DailyClaimResponse result = service.claim(ACCOUNT);
 
-        // streak 3 -> 4, day-4 reward is 300.
-        assertEquals(4, result.currentStreak());
-        assertEquals(300L, result.rewardVp());
+        assertEquals(2000L, result.rewardVp());
     }
 
     @Test
-    void gap_resetsStreakToOne() {
-        LocalDate threeDaysAgo = LocalDate.now(ZoneOffset.UTC).minusDays(3);
-        when(dailyRewardStateRepository.findForUpdate(ACCOUNT)).thenReturn(Optional.of(state(threeDaysAgo, 5)));
-        stubClaimWrites(99999L);
+    void status_neverClaimed_isClaimable() {
+        when(dailyRewardStateRepository.findById(ACCOUNT)).thenReturn(Optional.empty());
 
-        DailyClaimResponse result = service.claim(ACCOUNT);
+        DailyStatusResponse status = service.getStatus(ACCOUNT);
 
-        assertEquals(1, result.currentStreak());
-        assertEquals(100L, result.rewardVp());
+        assertEquals(true, status.claimable());
+        assertEquals(2000L, status.rewardVp());
+    }
+
+    @Test
+    void status_withinCooldown_reportsRemaining() {
+        when(dailyRewardStateRepository.findById(ACCOUNT))
+                .thenReturn(Optional.of(state(Instant.now().minus(Duration.ofHours(1)))));
+
+        DailyStatusResponse status = service.getStatus(ACCOUNT);
+
+        assertEquals(false, status.claimable());
+        assertEquals(true, status.secondsUntilNextClaim() > 0);
     }
 }

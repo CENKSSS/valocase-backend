@@ -100,7 +100,7 @@ public class BattleLobbyService {
     public static final Duration CONNECTION_TIMEOUT = Duration.ofSeconds(15);
 
     /** A lobby may select at most this many distinct cases. */
-    public static final int MAX_CASE_TYPES = 4;
+    public static final int MAX_CASE_TYPES = 5;
 
     private final CaseDefinitionRepository caseDefinitionRepository;
     private final CaseEntryRepository caseEntryRepository;
@@ -585,6 +585,8 @@ public class BattleLobbyService {
             if (slot.getSlotType() == SlotType.REAL && slot.getAccountId() != null) {
                 accountRepository.findById(slot.getAccountId())
                         .ifPresent(account -> progressionService.grantCaseOpenXp(account, PVP_BATTLE_XP));
+                eventPublisher.publishEvent(
+                        new MissionProgressEvent(slot.getAccountId(), MissionEventTypes.BATTLE_PLAYED, 1));
             }
         }
     }
