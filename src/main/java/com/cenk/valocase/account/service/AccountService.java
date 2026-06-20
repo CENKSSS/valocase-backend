@@ -29,8 +29,13 @@ public class AccountService {
     /** Starting VP balance granted to every new guest. */
     public static final long STARTING_VP = 10_000L;
 
+    /** Minimum length of a player-chosen display name. */
+    public static final int DISPLAY_NAME_MIN_LENGTH = 3;
     /** Maximum length of a player-chosen display name. */
     public static final int DISPLAY_NAME_MAX_LENGTH = 20;
+
+    private static final java.util.regex.Pattern DISPLAY_NAME_PATTERN =
+            java.util.regex.Pattern.compile("^[A-Za-z0-9_]+$");
 
     private final AccountRepository accountRepository;
     private final WalletService walletService;
@@ -44,6 +49,8 @@ public class AccountService {
         account.setStatus(AccountStatus.ACTIVE);
         account.setCreatedAt(now);
         account.setLastSeenAt(now);
+        account = accountRepository.save(account);
+        account.setDisplayName(defaultDisplayName(account.getId()));
         account = accountRepository.save(account);
 
         Wallet wallet = walletService.createInitialWallet(account.getId(), STARTING_VP);
@@ -63,13 +70,24 @@ public class AccountService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "displayName is required");
         }
         String trimmed = rawDisplayName.trim();
-        if (trimmed.length() > DISPLAY_NAME_MAX_LENGTH) {
+        if (trimmed.length() < DISPLAY_NAME_MIN_LENGTH || trimmed.length() > DISPLAY_NAME_MAX_LENGTH) {
             throw new ApiException(HttpStatus.BAD_REQUEST,
-                    "displayName must be at most " + DISPLAY_NAME_MAX_LENGTH + " characters");
+                    "displayName must be between " + DISPLAY_NAME_MIN_LENGTH
+                            + " and " + DISPLAY_NAME_MAX_LENGTH + " characters");
+        }
+        if (!DISPLAY_NAME_PATTERN.matcher(trimmed).matches()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST,
+                    "displayName may only contain letters, numbers and underscore");
         }
         account.setDisplayName(trimmed);
         accountRepository.save(account);
         return new AccountProfileResponse(account.getId().toString(), account.getDisplayName());
+    }
+
+    /** Default name for a fresh account: "Agent" + 4 stable chars from the account id. */
+    public static String defaultDisplayName(UUID accountId) {
+        String suffix = accountId.toString().replace("-", "").substring(0, 4).toUpperCase();
+        return "Agent" + suffix;
     }
 
     /**
@@ -83,8 +101,7 @@ public class AccountService {
         if (accountId == null) {
             return "Oyuncu";
         }
-        String suffix = accountId.toString().replace("-", "").substring(0, 4).toUpperCase();
-        return "Agent " + suffix;
+        return defaultDisplayName(accountId);
     }
 
     /**
