@@ -200,6 +200,7 @@ public class BattleLobbyService {
         creatorSlot.setSlotType(SlotType.REAL);
         creatorSlot.setAccountId(accountId);
         creatorSlot.setDisplayName(creator.getDisplayName());
+        creatorSlot.setAvatarId(creator.getAvatarId());
         creatorSlot.setCreator(true);
         creatorSlot.setChargedVp(entryCost);
         creatorSlot.setLastSeenAt(Instant.now());
@@ -331,6 +332,7 @@ public class BattleLobbyService {
         target.setSlotType(SlotType.REAL);
         target.setAccountId(accountId);
         target.setDisplayName(joiner.getDisplayName());
+        target.setAvatarId(joiner.getAvatarId());
         target.setChargedVp(entryCost);
         target.setLastSeenAt(Instant.now());
         slotRepository.save(target);
@@ -367,6 +369,7 @@ public class BattleLobbyService {
         seat.setSlotType(SlotType.EMPTY);
         seat.setAccountId(null);
         seat.setDisplayName(null);
+        seat.setAvatarId(null);
         seat.setChargedVp(0L);
         seat.setLastSeenAt(null);
         slotRepository.save(seat);
@@ -398,6 +401,7 @@ public class BattleLobbyService {
         target.setSlotType(SlotType.BOT);
         target.setAccountId(null);
         target.setDisplayName("Bot " + target.getSlotIndex());
+        target.setAvatarId(AccountService.DEFAULT_AVATAR_ID);
         target.setChargedVp(0L);
         slotRepository.save(target);
 
@@ -537,6 +541,7 @@ public class BattleLobbyService {
             participant.setParticipantIndex(p);
             participant.setUser(slot.getSlotType() == SlotType.REAL);
             participant.setName(slotDisplayName(slot));
+            participant.setAvatarId(slotAvatarId(slot));
             participant.setTotalVp(totals[p]);
             participants.add(participant);
         }
@@ -623,6 +628,14 @@ public class BattleLobbyService {
             return AccountService.resolveDisplayName(slot.getDisplayName(), slot.getAccountId());
         }
         return slot.getDisplayName();
+    }
+
+    /** Avatar shown to clients: real/bot slots fall back to the default, empty slots have none. */
+    private static String slotAvatarId(BattleLobbySlot slot) {
+        if (slot.getSlotType() == SlotType.EMPTY) {
+            return null;
+        }
+        return AccountService.resolveAvatarId(slot.getAvatarId());
     }
 
     /** A real slot seen within the connection window counts as connected. */
@@ -736,6 +749,7 @@ public class BattleLobbyService {
 
         List<LobbySlotResponse> slotResponses = new ArrayList<>(slots.size());
         String winnerDisplayName = null;
+        String winnerAvatarId = null;
         for (BattleLobbySlot slot : slots) {
             boolean addBotAllowed = slot.getSlotType() == SlotType.EMPTY && addBotWindowOpen;
             boolean connected = switch (slot.getSlotType()) {
@@ -747,11 +761,13 @@ public class BattleLobbyService {
             Long totalVp = participant != null ? participant.getTotalVp() : null;
             List<RolledSkinResponse> rounds = rollsByIndex.get(slot.getSlotIndex());
             String slotDisplayName = slotDisplayName(slot);
+            String slotAvatarId = slotAvatarId(slot);
             slotResponses.add(new LobbySlotResponse(
                     slot.getSlotIndex(),
                     slot.getSlotType().name(),
                     slot.getAccountId() != null ? slot.getAccountId().toString() : null,
                     slotDisplayName,
+                    slotAvatarId,
                     slot.isCreator(),
                     addBotAllowed,
                     connected,
@@ -760,14 +776,16 @@ public class BattleLobbyService {
             ));
             if (lobby.getWinnerSlotIndex() != null && lobby.getWinnerSlotIndex() == slot.getSlotIndex()) {
                 winnerDisplayName = slotDisplayName;
+                winnerAvatarId = slotAvatarId;
             }
         }
 
-        String creatorDisplayName = slots.stream()
+        BattleLobbySlot creatorSlot = slots.stream()
                 .filter(BattleLobbySlot::isCreator)
                 .findFirst()
-                .map(BattleLobbyService::slotDisplayName)
                 .orElse(null);
+        String creatorDisplayName = creatorSlot != null ? slotDisplayName(creatorSlot) : null;
+        String creatorAvatarId = creatorSlot != null ? slotAvatarId(creatorSlot) : null;
 
         List<CaseSelectionResponse> caseSelections = buildCaseSelections(lobby, lobbyCases, caseById);
         CaseDefinition primaryCase = caseById.get(lobby.getCaseId());
@@ -775,7 +793,7 @@ public class BattleLobbyService {
         return new LobbyResponse(
                 lobby.getId().toString(),
                 lobby.getStatus().name(),
-                new LobbyCreatorResponse(lobby.getCreatorAccountId().toString(), creatorDisplayName),
+                new LobbyCreatorResponse(lobby.getCreatorAccountId().toString(), creatorDisplayName, creatorAvatarId),
                 lobby.getCaseId(),
                 primaryCase != null ? primaryCase.getDisplayName() : null,
                 caseSelections,
@@ -790,6 +808,7 @@ public class BattleLobbyService {
                 lobby.getReadyAt(),
                 lobby.getWinnerSlotIndex(),
                 winnerDisplayName,
+                winnerAvatarId,
                 winnerRewarded
         );
     }

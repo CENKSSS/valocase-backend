@@ -39,6 +39,9 @@ public class BattleParticipant {
     @Column(name = "name", length = 100, updatable = false)
     private String name;
 
+    @Column(name = "avatar_id", length = 50, updatable = false)
+    private String avatarId;
+
     @Column(name = "total_vp", nullable = false, updatable = false)
     private long totalVp;
 }

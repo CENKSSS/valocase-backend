@@ -17,6 +17,7 @@ public record LobbySlotResponse(
         String type,
         String accountId,
         String displayName,
+        String avatarId,
         boolean creator,
         boolean addBotAllowed,
         boolean connected,

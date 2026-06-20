@@ -39,7 +39,9 @@ public class BotBattleController {
                     "Request body with caseId, rounds and participantCount is required");
         }
         String userDisplayName = AccountService.resolveDisplayName(account.getDisplayName(), account.getId());
+        String userAvatarId = AccountService.resolveAvatarId(account.getAvatarId());
         return botBattleService.createAndResolve(
-                account.getId(), userDisplayName, request.caseId(), request.rounds(), request.participantCount());
+                account.getId(), userDisplayName, userAvatarId,
+                request.caseId(), request.rounds(), request.participantCount());
     }
 }

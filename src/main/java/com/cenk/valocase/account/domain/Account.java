@@ -37,6 +37,9 @@ public class Account {
     @Column(name = "display_name", length = 100)
     private String displayName;
 
+    @Column(name = "avatar_id", length = 50)
+    private String avatarId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 30, nullable = false)
     private AccountStatus status;

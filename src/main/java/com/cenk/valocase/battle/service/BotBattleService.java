@@ -13,6 +13,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.cenk.valocase.account.service.AccountService;
 import com.cenk.valocase.battle.domain.Battle;
 import com.cenk.valocase.battle.domain.BattleParticipant;
 import com.cenk.valocase.battle.domain.BattleRoll;
@@ -70,7 +71,8 @@ public class BotBattleService {
 
     @Transactional
     public BattleResultResponse createAndResolve(
-            UUID accountId, String userDisplayName, String caseId, int rounds, int participantCount) {
+            UUID accountId, String userDisplayName, String userAvatarId,
+            String caseId, int rounds, int participantCount) {
         // 1. Validate lobby parameters.
         if (rounds < ROUNDS_MIN || rounds > ROUNDS_MAX) {
             throw new ApiException(HttpStatus.BAD_REQUEST,
@@ -161,6 +163,7 @@ public class BotBattleService {
             participant.setParticipantIndex(p);
             participant.setUser(p == 0);
             participant.setName(p == 0 ? userDisplayName : "Bot " + p);
+            participant.setAvatarId(p == 0 ? userAvatarId : AccountService.DEFAULT_AVATAR_ID);
             participant.setTotalVp(totals[p]);
             participants.add(participant);
         }
@@ -203,7 +206,8 @@ public class BotBattleService {
                     .map(BotBattleService::toRolledSkin)
                     .toList();
             participantResponses.add(new BattleParticipantResponse(
-                    p, p == 0, p == 0 ? userDisplayName : "Bot " + p, totals[p], roundSkins));
+                    p, p == 0, p == 0 ? userDisplayName : "Bot " + p,
+                    p == 0 ? userAvatarId : AccountService.DEFAULT_AVATAR_ID, totals[p], roundSkins));
         }
 
         return new BattleResultResponse(

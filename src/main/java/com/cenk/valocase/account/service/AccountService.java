@@ -9,6 +9,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.cenk.valocase.account.domain.Account;
 import com.cenk.valocase.account.domain.AccountStatus;
+import com.cenk.valocase.account.dto.AccountAvatarResponse;
 import com.cenk.valocase.account.dto.AccountProfileResponse;
 import com.cenk.valocase.account.dto.GuestRegisterResponse;
 import com.cenk.valocase.account.repository.AccountRepository;
@@ -37,6 +38,14 @@ public class AccountService {
     private static final java.util.regex.Pattern DISPLAY_NAME_PATTERN =
             java.util.regex.Pattern.compile("^[A-Za-z0-9_]+$");
 
+    /** Default avatar for new accounts and the fallback for null/blank avatars. */
+    public static final String DEFAULT_AVATAR_ID = "avatar_1";
+    /** Maximum length of an avatar id. */
+    public static final int AVATAR_ID_MAX_LENGTH = 50;
+
+    private static final java.util.regex.Pattern AVATAR_ID_PATTERN =
+            java.util.regex.Pattern.compile("^[A-Za-z0-9_-]+$");
+
     private final AccountRepository accountRepository;
     private final WalletService walletService;
 
@@ -51,6 +60,7 @@ public class AccountService {
         account.setLastSeenAt(now);
         account = accountRepository.save(account);
         account.setDisplayName(defaultDisplayName(account.getId()));
+        account.setAvatarId(DEFAULT_AVATAR_ID);
         account = accountRepository.save(account);
 
         Wallet wallet = walletService.createInitialWallet(account.getId(), STARTING_VP);
@@ -59,6 +69,7 @@ public class AccountService {
                 account.getId().toString(),
                 account.getGuestToken().toString(),
                 account.getDisplayName(),
+                account.getAvatarId(),
                 account.getStatus().name(),
                 wallet.getVpBalance()
         );
@@ -82,6 +93,33 @@ public class AccountService {
         account.setDisplayName(trimmed);
         accountRepository.save(account);
         return new AccountProfileResponse(account.getId().toString(), account.getDisplayName());
+    }
+
+    @Transactional
+    public AccountAvatarResponse updateAvatar(Account account, String rawAvatarId) {
+        if (rawAvatarId == null || rawAvatarId.isBlank()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "avatarId is required");
+        }
+        String trimmed = rawAvatarId.trim();
+        if (trimmed.length() > AVATAR_ID_MAX_LENGTH) {
+            throw new ApiException(HttpStatus.BAD_REQUEST,
+                    "avatarId must be at most " + AVATAR_ID_MAX_LENGTH + " characters");
+        }
+        if (!AVATAR_ID_PATTERN.matcher(trimmed).matches()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST,
+                    "avatarId may only contain letters, numbers, underscore and dash");
+        }
+        account.setAvatarId(trimmed);
+        accountRepository.save(account);
+        return new AccountAvatarResponse(account.getId().toString(), account.getAvatarId());
+    }
+
+    /** The avatar to show: the chosen avatar, or the default when null/blank. */
+    public static String resolveAvatarId(String avatarId) {
+        if (avatarId != null && !avatarId.isBlank()) {
+            return avatarId.trim();
+        }
+        return DEFAULT_AVATAR_ID;
     }
 
     /** Default name for a fresh account: "Agent" + 4 stable chars from the account id. */

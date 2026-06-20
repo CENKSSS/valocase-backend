@@ -10,8 +10,10 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.cenk.valocase.account.domain.Account;
+import com.cenk.valocase.account.dto.AccountAvatarResponse;
 import com.cenk.valocase.account.dto.AccountProfileResponse;
 import com.cenk.valocase.account.dto.GuestRegisterResponse;
+import com.cenk.valocase.account.dto.UpdateAvatarRequest;
 import com.cenk.valocase.account.dto.UpdateDisplayNameRequest;
 import com.cenk.valocase.account.service.AccountService;
 import com.cenk.valocase.common.exception.ApiException;
@@ -45,5 +47,17 @@ public class AccountController {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Request body with displayName is required");
         }
         return accountService.updateDisplayName(account, request.displayName());
+    }
+
+    /** Saves the player's selected avatar on the account. */
+    @PutMapping("/account/avatar")
+    public AccountAvatarResponse updateAvatar(
+            @RequestHeader(value = "X-Guest-Token", required = false) String guestToken,
+            @RequestBody(required = false) UpdateAvatarRequest request) {
+        Account account = accountService.requireAccountByToken(guestToken);
+        if (request == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Request body with avatarId is required");
+        }
+        return accountService.updateAvatar(account, request.avatarId());
     }
 }

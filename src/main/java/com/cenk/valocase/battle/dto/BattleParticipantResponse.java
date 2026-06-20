@@ -10,6 +10,7 @@ public record BattleParticipantResponse(
         int index,
         boolean isUser,
         String name,
+        String avatarId,
         long totalVp,
         List<RolledSkinResponse> rounds
 ) {

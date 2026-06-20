@@ -8,6 +8,7 @@ public record GuestRegisterResponse(
         String accountId,
         String guestToken,
         String displayName,
+        String avatarId,
         String status,
         long vpBalance
 ) {

@@ -53,6 +53,9 @@ public class BattleLobbySlot {
     @Column(name = "display_name", length = 100)
     private String displayName;
 
+    @Column(name = "avatar_id", length = 50)
+    private String avatarId;
+
     @Column(name = "is_creator", nullable = false)
     private boolean creator;
 

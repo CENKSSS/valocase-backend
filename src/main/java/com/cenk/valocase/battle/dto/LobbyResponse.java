@@ -33,6 +33,7 @@ public record LobbyResponse(
         Instant readyAt,
         Integer winnerSlotIndex,
         String winnerDisplayName,
+        String winnerAvatarId,
         Boolean winnerRewarded
 ) {
 }
