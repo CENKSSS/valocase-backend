@@ -30,4 +30,6 @@ public interface InventoryItemRepository extends JpaRepository<InventoryItem, UU
     @Query("select i from InventoryItem i where i.id in :ids and i.accountId = :accountId")
     List<InventoryItem> findForUpdateByIdInAndAccountId(@Param("ids") Collection<UUID> ids,
                                                         @Param("accountId") UUID accountId);
+
+    List<InventoryItem> findByIdInAndAccountId(Collection<UUID> ids, UUID accountId);
 }

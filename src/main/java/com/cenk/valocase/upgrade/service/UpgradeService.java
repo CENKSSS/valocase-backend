@@ -26,6 +26,7 @@ import com.cenk.valocase.mission.event.MissionProgressEvent;
 import com.cenk.valocase.upgrade.domain.Upgrade;
 import com.cenk.valocase.upgrade.domain.UpgradeInput;
 import com.cenk.valocase.upgrade.domain.UpgradeTarget;
+import com.cenk.valocase.upgrade.dto.UpgradePreviewResponse;
 import com.cenk.valocase.upgrade.dto.UpgradeResultResponse;
 import com.cenk.valocase.upgrade.repository.UpgradeInputRepository;
 import com.cenk.valocase.upgrade.repository.UpgradeRepository;
@@ -68,86 +69,23 @@ public class UpgradeService {
 
     @Transactional
     public UpgradeResultResponse upgrade(UUID accountId, List<String> rawInputItemIds, List<String> rawTargetSkinIds) {
-        // 1. Basic request validation.
-        if (rawInputItemIds == null || rawInputItemIds.isEmpty()) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "inputItemIds must not be empty");
-        }
-        if (rawTargetSkinIds == null || rawTargetSkinIds.isEmpty()) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "targetSkinIds must not be empty");
-        }
+        Valuation v = valuate(accountId, rawInputItemIds, rawTargetSkinIds, true);
+        List<InventoryItem> items = v.items();
+        Map<String, Skin> skinsById = v.skinsById();
+        Map<String, Skin> targetsById = v.targetsById();
+        List<String> targetSkinIds = v.targetSkinIds();
+        long inputValue = v.inputValue();
+        long targetValue = v.targetValue();
 
-        // 2. Parse the item ids.
-        List<UUID> inputItemIds = new ArrayList<>(rawInputItemIds.size());
-        for (String raw : rawInputItemIds) {
-            if (raw == null || raw.isBlank()) {
-                throw new ApiException(HttpStatus.BAD_REQUEST, "inputItemIds contains a blank id");
-            }
-            try {
-                inputItemIds.add(UUID.fromString(raw.trim()));
-            } catch (IllegalArgumentException e) {
-                throw new ApiException(HttpStatus.BAD_REQUEST, "Invalid item id: " + raw);
-            }
-        }
-
-        // 3. Reject duplicate input items.
-        Set<UUID> distinctIds = new LinkedHashSet<>(inputItemIds);
-        if (distinctIds.size() != inputItemIds.size()) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "Duplicate input item IDs are not allowed");
-        }
-
-        // 4. Normalize target ids, reject blanks and duplicates.
-        List<String> targetSkinIds = new ArrayList<>(rawTargetSkinIds.size());
-        Set<String> distinctTargets = new LinkedHashSet<>();
-        for (String raw : rawTargetSkinIds) {
-            if (raw == null || raw.isBlank()) {
-                throw new ApiException(HttpStatus.BAD_REQUEST, "targetSkinIds contains a blank id");
-            }
-            String id = raw.trim();
-            if (!distinctTargets.add(id)) {
-                throw new ApiException(HttpStatus.BAD_REQUEST, "Duplicate target skin IDs are not allowed");
-            }
-            targetSkinIds.add(id);
-        }
-
-        // 5. Every target skin must exist and be active.
-        Map<String, Skin> targetsById = skinRepository.findAllById(distinctTargets).stream()
-                .collect(Collectors.toMap(Skin::getId, Function.identity()));
-        for (String id : targetSkinIds) {
-            Skin target = targetsById.get(id);
-            if (target == null) {
-                throw new ApiException(HttpStatus.NOT_FOUND, "Target skin not found: " + id);
-            }
-            if (!target.isActive()) {
-                throw new ApiException(HttpStatus.NOT_FOUND, "Target skin is not available: " + id);
-            }
-        }
-
-        // 6. Lock and load the input items (must all be owned and still present).
-        List<InventoryItem> items = inventoryItemRepository.findForUpdateByIdInAndAccountId(distinctIds, accountId);
-        if (items.size() != distinctIds.size()) {
-            throw new ApiException(HttpStatus.NOT_FOUND,
-                    "One or more input items are not owned or no longer available");
-        }
-
-        // 7. Compute total input value from catalog vpValues.
-        Map<String, Skin> skinsById = skinRepository
-                .findAllById(items.stream().map(InventoryItem::getSkinId).distinct().toList())
-                .stream()
-                .collect(Collectors.toMap(Skin::getId, Function.identity()));
-        long inputValue = items.stream().mapToLong(item -> skinValue(skinsById, item.getSkinId())).sum();
-        long targetValue = targetSkinIds.stream().mapToLong(id -> targetsById.get(id).getVpValue()).sum();
-
-        // 8. Input value must not exceed target value (no downgrade); blocks cleanly.
+        // Input value must not exceed target value (no downgrade); blocks cleanly.
         if (inputValue > targetValue) {
             throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
                     "Total input value (" + inputValue + ") must not exceed target value (" + targetValue + ")",
                     CODE_UPGRADE_NOT_POSSIBLE);
         }
 
-        // 9. Compute chance and roll, server-side.
-        boolean targetIsMelee = targetSkinIds.stream().anyMatch(id -> isMelee(targetsById.get(id)));
-        int meleeInputCount = (int) items.stream().filter(item -> isMelee(skinsById.get(item.getSkinId()))).count();
-        double chance = chanceCalculator.computeChance(inputValue, targetValue, targetIsMelee, meleeInputCount);
+        double chance = chanceCalculator.computeChance(
+                inputValue, targetValue, v.targetIsMelee(), v.meleeInputCount());
         boolean success = chanceCalculator.roll(chance);
 
         // 10. Record the attempt first (gives a stable upgradeId).
@@ -213,6 +151,100 @@ public class UpgradeService {
         );
     }
 
+    /**
+     * Read-only preview of the exact chance the real upgrade would use. Shares
+     * {@link #valuate} and {@link UpgradeChanceCalculator} with execution so the
+     * previewed chance always matches the rolled chance. Never consumes, rolls, or grants.
+     */
+    @Transactional(readOnly = true)
+    public UpgradePreviewResponse preview(UUID accountId, List<String> rawInputItemIds, String rawTargetSkinId) {
+        if (rawTargetSkinId == null || rawTargetSkinId.isBlank()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "targetSkinId must not be empty");
+        }
+        Valuation v = valuate(accountId, rawInputItemIds, List.of(rawTargetSkinId), false);
+
+        if (v.inputValue() > v.targetValue()) {
+            return new UpgradePreviewResponse(false, 0.0, CODE_UPGRADE_NOT_POSSIBLE, v.inputValue(), v.targetValue());
+        }
+
+        double chance = chanceCalculator.computeChance(
+                v.inputValue(), v.targetValue(), v.targetIsMelee(), v.meleeInputCount());
+        return new UpgradePreviewResponse(true, chance, null, v.inputValue(), v.targetValue());
+    }
+
+    private Valuation valuate(UUID accountId, List<String> rawInputItemIds,
+                              List<String> rawTargetSkinIds, boolean lockItems) {
+        if (rawInputItemIds == null || rawInputItemIds.isEmpty()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "inputItemIds must not be empty");
+        }
+        if (rawTargetSkinIds == null || rawTargetSkinIds.isEmpty()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "targetSkinIds must not be empty");
+        }
+
+        List<UUID> inputItemIds = new ArrayList<>(rawInputItemIds.size());
+        for (String raw : rawInputItemIds) {
+            if (raw == null || raw.isBlank()) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "inputItemIds contains a blank id");
+            }
+            try {
+                inputItemIds.add(UUID.fromString(raw.trim()));
+            } catch (IllegalArgumentException e) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "Invalid item id: " + raw);
+            }
+        }
+
+        Set<UUID> distinctIds = new LinkedHashSet<>(inputItemIds);
+        if (distinctIds.size() != inputItemIds.size()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Duplicate input item IDs are not allowed");
+        }
+
+        List<String> targetSkinIds = new ArrayList<>(rawTargetSkinIds.size());
+        Set<String> distinctTargets = new LinkedHashSet<>();
+        for (String raw : rawTargetSkinIds) {
+            if (raw == null || raw.isBlank()) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "targetSkinIds contains a blank id");
+            }
+            String id = raw.trim();
+            if (!distinctTargets.add(id)) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "Duplicate target skin IDs are not allowed");
+            }
+            targetSkinIds.add(id);
+        }
+
+        Map<String, Skin> targetsById = skinRepository.findAllById(distinctTargets).stream()
+                .collect(Collectors.toMap(Skin::getId, Function.identity()));
+        for (String id : targetSkinIds) {
+            Skin target = targetsById.get(id);
+            if (target == null) {
+                throw new ApiException(HttpStatus.NOT_FOUND, "Target skin not found: " + id);
+            }
+            if (!target.isActive()) {
+                throw new ApiException(HttpStatus.NOT_FOUND, "Target skin is not available: " + id);
+            }
+        }
+
+        List<InventoryItem> items = lockItems
+                ? inventoryItemRepository.findForUpdateByIdInAndAccountId(distinctIds, accountId)
+                : inventoryItemRepository.findByIdInAndAccountId(distinctIds, accountId);
+        if (items.size() != distinctIds.size()) {
+            throw new ApiException(HttpStatus.NOT_FOUND,
+                    "One or more input items are not owned or no longer available");
+        }
+
+        Map<String, Skin> skinsById = skinRepository
+                .findAllById(items.stream().map(InventoryItem::getSkinId).distinct().toList())
+                .stream()
+                .collect(Collectors.toMap(Skin::getId, Function.identity()));
+        long inputValue = items.stream().mapToLong(item -> skinValue(skinsById, item.getSkinId())).sum();
+        long targetValue = targetSkinIds.stream().mapToLong(id -> targetsById.get(id).getVpValue()).sum();
+
+        boolean targetIsMelee = targetSkinIds.stream().anyMatch(id -> isMelee(targetsById.get(id)));
+        int meleeInputCount = (int) items.stream().filter(item -> isMelee(skinsById.get(item.getSkinId()))).count();
+
+        return new Valuation(items, skinsById, targetsById, targetSkinIds,
+                inputValue, targetValue, targetIsMelee, meleeInputCount);
+    }
+
     private static long skinValue(Map<String, Skin> skinsById, String skinId) {
         Skin skin = skinsById.get(skinId);
         return skin != null ? skin.getVpValue() : 0;
@@ -220,5 +252,16 @@ public class UpgradeService {
 
     private static boolean isMelee(Skin skin) {
         return skin != null && "Melee".equalsIgnoreCase(skin.getWeapon());
+    }
+
+    private record Valuation(
+            List<InventoryItem> items,
+            Map<String, Skin> skinsById,
+            Map<String, Skin> targetsById,
+            List<String> targetSkinIds,
+            long inputValue,
+            long targetValue,
+            boolean targetIsMelee,
+            int meleeInputCount) {
     }
 }

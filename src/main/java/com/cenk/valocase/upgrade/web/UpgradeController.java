@@ -12,6 +12,8 @@ import org.springframework.web.bind.annotation.RestController;
 import com.cenk.valocase.account.domain.Account;
 import com.cenk.valocase.account.service.AccountService;
 import com.cenk.valocase.common.exception.ApiException;
+import com.cenk.valocase.upgrade.dto.UpgradePreviewRequest;
+import com.cenk.valocase.upgrade.dto.UpgradePreviewResponse;
 import com.cenk.valocase.upgrade.dto.UpgradeRequest;
 import com.cenk.valocase.upgrade.dto.UpgradeResultResponse;
 import com.cenk.valocase.upgrade.service.UpgradeService;
@@ -42,6 +44,19 @@ public class UpgradeController {
         }
         List<String> targetSkinIds = resolveTargetSkinIds(request);
         return upgradeService.upgrade(account.getId(), request.inputItemIds(), targetSkinIds);
+    }
+
+    /** Read-only preview of the exact chance the real upgrade would use. */
+    @PostMapping("/upgrade/preview")
+    public UpgradePreviewResponse preview(
+            @RequestHeader(value = "X-Guest-Token", required = false) String guestToken,
+            @RequestBody(required = false) UpgradePreviewRequest request) {
+        Account account = accountService.requireAccountByToken(guestToken);
+        if (request == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST,
+                    "Request body with inputInventoryItemIds and targetSkinId is required");
+        }
+        return upgradeService.preview(account.getId(), request.inputInventoryItemIds(), request.targetSkinId());
     }
 
     private static List<String> resolveTargetSkinIds(UpgradeRequest request) {
