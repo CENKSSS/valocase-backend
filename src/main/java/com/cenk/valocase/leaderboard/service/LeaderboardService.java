@@ -24,19 +24,22 @@ import lombok.RequiredArgsConstructor;
  * Builds the three Battle-screen leaderboards. Ranking is done entirely in SQL
  * (top-N plus a count of accounts strictly ahead of the viewer) so no full table
  * scan happens in memory. The viewer's own standing is always computed so the
- * client can render its summary panel even when the viewer is inside the top 10.
+ * client can render its summary panel even when the viewer is inside the top 25.
  */
 @Service
 @RequiredArgsConstructor
 public class LeaderboardService {
 
-    static final int TOP_LIMIT = 10;
+    static final int TOP_LIMIT = 25;
 
     /** Completed battles a player needs before they appear on the win-rate board. */
     static final int MIN_WIN_RATE_BATTLES = 10;
 
+    /** Above this rank the viewer's exact position is hidden behind a ">500" label. */
+    static final int MAX_EXACT_RANK = 500;
+
     private static final String UNRANKED_LABEL = "Unranked";
-    private static final String OUT_OF_TOP_LABEL = ">" + TOP_LIMIT;
+    private static final String OUT_OF_RANGE_LABEL = ">" + MAX_EXACT_RANK;
 
     private final LeaderboardRepository leaderboardRepository;
     private final WalletRepository walletRepository;
@@ -69,7 +72,7 @@ public class LeaderboardService {
                 ? null
                 : (int) (leaderboardRepository.countAccountsWithMoreBattles(battles) + 1);
         LeaderboardMeResponse meResponse = new LeaderboardMeResponse(
-                rankValue,
+                exposedRank(rankValue),
                 rankLabel(rankValue),
                 AccountService.resolveDisplayName(viewer.getDisplayName(), viewer.getId()),
                 AccountService.resolveAvatarId(viewer.getAvatarId()),
@@ -99,7 +102,7 @@ public class LeaderboardService {
                 : (int) (leaderboardRepository.countAccountsAboveWinRate(
                         MIN_WIN_RATE_BATTLES, me.getWins(), battles) + 1);
         LeaderboardMeResponse meResponse = new LeaderboardMeResponse(
-                rankValue,
+                exposedRank(rankValue),
                 rankLabel(rankValue),
                 AccountService.resolveDisplayName(viewer.getDisplayName(), viewer.getId()),
                 AccountService.resolveAvatarId(viewer.getAvatarId()),
@@ -127,7 +130,7 @@ public class LeaderboardService {
                 .orElse(0L);
         int rankValue = (int) (leaderboardRepository.countWalletsAbove(balance) + 1);
         LeaderboardMeResponse meResponse = new LeaderboardMeResponse(
-                rankValue,
+                exposedRank(rankValue),
                 rankLabel(rankValue),
                 AccountService.resolveDisplayName(viewer.getDisplayName(), viewer.getId()),
                 AccountService.resolveAvatarId(viewer.getAvatarId()),
@@ -156,6 +159,13 @@ public class LeaderboardService {
         if (rank == null) {
             return UNRANKED_LABEL;
         }
-        return rank > TOP_LIMIT ? OUT_OF_TOP_LABEL : String.valueOf(rank);
+        return rank > MAX_EXACT_RANK ? OUT_OF_RANGE_LABEL : String.valueOf(rank);
+    }
+
+    private static Integer exposedRank(Integer rank) {
+        if (rank != null && rank > MAX_EXACT_RANK) {
+            return null;
+        }
+        return rank;
     }
 }

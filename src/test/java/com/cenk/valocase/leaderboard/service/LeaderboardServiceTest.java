@@ -74,8 +74,8 @@ class LeaderboardServiceTest {
     }
 
     @Test
-    void mostBattlesRanksEntriesAndPlacesViewerOutsideTopTen() {
-        when(leaderboardRepository.topByMostBattles(eq(10)))
+    void mostBattlesRanksEntriesAndPlacesViewerWithExactRank() {
+        when(leaderboardRepository.topByMostBattles(eq(25)))
                 .thenReturn(List.of(battleRow("Top", 35, 17), battleRow("Second", 20, 4)));
         when(leaderboardRepository.battleTotalsForAccount(VIEWER)).thenReturn(totals(8, 3));
         when(leaderboardRepository.countAccountsWithMoreBattles(8)).thenReturn(11L);
@@ -88,15 +88,31 @@ class LeaderboardServiceTest {
         assertEquals(35, response.entries().get(0).value());
         assertEquals("49%", response.entries().get(0).secondaryValue());
         assertEquals(12, response.me().rank());
-        assertEquals(">10", response.me().rankLabel());
+        assertEquals("12", response.me().rankLabel());
         assertEquals(8, response.me().value());
         assertEquals("38%", response.me().secondaryValue());
         assertEquals("CENK", response.me().displayName());
     }
 
     @Test
+    void mostBattlesShowsExactRankAtCapAndHidesAboveIt() {
+        when(leaderboardRepository.topByMostBattles(eq(25))).thenReturn(List.of());
+        when(leaderboardRepository.battleTotalsForAccount(VIEWER)).thenReturn(totals(2, 1));
+
+        when(leaderboardRepository.countAccountsWithMoreBattles(2)).thenReturn(499L);
+        LeaderboardResponse atCap = service.leaderboard(LeaderboardType.MOST_BATTLES, viewer());
+        assertEquals(500, atCap.me().rank());
+        assertEquals("500", atCap.me().rankLabel());
+
+        when(leaderboardRepository.countAccountsWithMoreBattles(2)).thenReturn(500L);
+        LeaderboardResponse aboveCap = service.leaderboard(LeaderboardType.MOST_BATTLES, viewer());
+        assertNull(aboveCap.me().rank());
+        assertEquals(">500", aboveCap.me().rankLabel());
+    }
+
+    @Test
     void mostBattlesMarksViewerWithNoBattlesUnranked() {
-        when(leaderboardRepository.topByMostBattles(eq(10))).thenReturn(List.of());
+        when(leaderboardRepository.topByMostBattles(eq(25))).thenReturn(List.of());
         when(leaderboardRepository.battleTotalsForAccount(VIEWER)).thenReturn(totals(0, 0));
 
         LeaderboardResponse response = service.leaderboard(LeaderboardType.MOST_BATTLES, viewer());
@@ -108,7 +124,7 @@ class LeaderboardServiceTest {
 
     @Test
     void winRateExposesPercentValueAndGatesBelowThreshold() {
-        when(leaderboardRepository.topByWinRate(eq(10L), eq(10)))
+        when(leaderboardRepository.topByWinRate(eq(10L), eq(25)))
                 .thenReturn(List.of(battleRow("Sharp", 40, 30)));
         when(leaderboardRepository.battleTotalsForAccount(VIEWER)).thenReturn(totals(5, 5));
 
@@ -125,7 +141,7 @@ class LeaderboardServiceTest {
 
     @Test
     void winRateRanksQualifiedViewer() {
-        when(leaderboardRepository.topByWinRate(anyLong(), eq(10))).thenReturn(List.of());
+        when(leaderboardRepository.topByWinRate(anyLong(), eq(25))).thenReturn(List.of());
         when(leaderboardRepository.battleTotalsForAccount(VIEWER)).thenReturn(totals(20, 13));
         when(leaderboardRepository.countAccountsAboveWinRate(10L, 13L, 20L)).thenReturn(2L);
 
@@ -138,7 +154,7 @@ class LeaderboardServiceTest {
 
     @Test
     void highestWalletRanksByBalance() {
-        when(leaderboardRepository.topByWalletValue(eq(10)))
+        when(leaderboardRepository.topByWalletValue(eq(25)))
                 .thenReturn(List.of(walletRow("Rich", 50_000), walletRow("Saver", 12_000)));
         Wallet wallet = new Wallet();
         wallet.setVpBalance(9_000);
