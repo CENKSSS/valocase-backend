@@ -2,23 +2,25 @@ package com.cenk.valocase.earnvp.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
@@ -26,8 +28,11 @@ import org.springframework.http.HttpStatus;
 
 import com.cenk.valocase.common.exception.ApiException;
 import com.cenk.valocase.earnvp.domain.EarnVpClaim;
+import com.cenk.valocase.earnvp.domain.EarnVpSession;
 import com.cenk.valocase.earnvp.dto.EarnVpClaimResponse;
+import com.cenk.valocase.earnvp.dto.EarnVpSessionResponse;
 import com.cenk.valocase.earnvp.repository.EarnVpClaimRepository;
+import com.cenk.valocase.earnvp.repository.EarnVpSessionRepository;
 import com.cenk.valocase.wallet.domain.Wallet;
 import com.cenk.valocase.wallet.dto.WalletResponse;
 import com.cenk.valocase.wallet.service.WalletService;
@@ -36,13 +41,33 @@ import com.cenk.valocase.wallet.service.WalletService;
 class EarnVpServiceTest {
 
     @Mock private EarnVpClaimRepository earnVpClaimRepository;
+    @Mock private EarnVpSessionRepository earnVpSessionRepository;
     @Mock private WalletService walletService;
     @Mock private ApplicationEventPublisher eventPublisher;
 
-    @InjectMocks private EarnVpService service;
+    private static final Instant NOW = Instant.parse("2026-06-21T00:00:00Z");
+    private final Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
+
+    private EarnVpService service;
 
     private static final UUID ACCOUNT = UUID.randomUUID();
-    private static final String SESSION = "session-1";
+    private static final UUID SESSION_ID = UUID.randomUUID();
+    private static final String SESSION = SESSION_ID.toString();
+
+    @BeforeEach
+    void setUp() {
+        service = new EarnVpService(earnVpClaimRepository, earnVpSessionRepository,
+                walletService, eventPublisher, clock);
+    }
+
+    /** A session that started {@code durationMs} before the fixed clock's now. */
+    private void stubSession(long durationMs) {
+        EarnVpSession session = new EarnVpSession();
+        session.setId(SESSION_ID);
+        session.setAccountId(ACCOUNT);
+        session.setStartedAt(NOW.minusMillis(durationMs));
+        when(earnVpSessionRepository.findByIdAndAccountId(SESSION_ID, ACCOUNT)).thenReturn(Optional.of(session));
+    }
 
     private void stubFreshClaim(long resultingBalance) {
         when(earnVpClaimRepository.findByAccountIdAndClientSessionId(ACCOUNT, SESSION)).thenReturn(Optional.empty());
@@ -63,7 +88,7 @@ class EarnVpServiceTest {
         c.setClientSessionId(SESSION);
         c.setTapCountAccepted(acceptedTaps);
         c.setVpGranted(vpGranted);
-        c.setCreatedAt(Instant.now());
+        c.setCreatedAt(NOW);
         return c;
     }
 
@@ -75,13 +100,33 @@ class EarnVpServiceTest {
         return list;
     }
 
+    // ---- session start ----------------------------------------------------
+
+    @Test
+    void startSession_persistsServerStart_andReturnsState() {
+        when(earnVpSessionRepository.saveAndFlush(any(EarnVpSession.class))).thenAnswer(inv -> {
+            EarnVpSession s = inv.getArgument(0);
+            s.setId(SESSION_ID);
+            return s;
+        });
+
+        EarnVpSessionResponse response = service.startSession(ACCOUNT);
+
+        assertEquals(SESSION, response.sessionId());
+        assertEquals(NOW.toEpochMilli(), response.serverStartEpochMs());
+        assertEquals(EarnVpService.MAX_DURATION_MS, response.maxDurationMs());
+        assertEquals(EarnVpService.MAX_TAP_RATE_PER_SECOND, response.maxTapRatePerSecond());
+        assertEquals(EarnVpService.MAX_TAPS_PER_CLAIM, response.maxTaps());
+    }
+
     // ---- aggregate fallback (no tapOffsetsMs) -----------------------------
 
     @Test
     void oneAcceptedTap_grants1Vp() {
+        stubSession(1_000L);
         stubFreshClaim(10001L);
 
-        EarnVpClaimResponse result = service.claim(ACCOUNT, 1, 1_000L, SESSION, null);
+        EarnVpClaimResponse result = service.claim(ACCOUNT, 1, SESSION, null);
 
         assertEquals(1, result.acceptedTapCount());
         assertEquals(1L, result.vpGranted());
@@ -90,9 +135,10 @@ class EarnVpServiceTest {
 
     @Test
     void tenAcceptedTaps_grants17Vp() {
+        stubSession(2_000L);
         stubFreshClaim(10017L);
 
-        EarnVpClaimResponse result = service.claim(ACCOUNT, 10, 2_000L, SESSION, null);
+        EarnVpClaimResponse result = service.claim(ACCOUNT, 10, SESSION, null);
 
         assertEquals(10, result.acceptedTapCount());
         assertEquals(17L, result.vpGranted());
@@ -100,153 +146,123 @@ class EarnVpServiceTest {
 
     @Test
     void hundredAcceptedTaps_grants318Vp() {
+        stubSession(10_000L);
         stubFreshClaim(10318L);
 
-        EarnVpClaimResponse result = service.claim(ACCOUNT, 100, 10_000L, SESSION, null);
+        EarnVpClaimResponse result = service.claim(ACCOUNT, 100, SESSION, null);
 
         assertEquals(100, result.acceptedTapCount());
         assertEquals(318L, result.vpGranted());
-    }
-
-    @Test
-    void emptyOffsets_usesAggregateFallback() {
-        stubFreshClaim(10017L);
-
-        EarnVpClaimResponse result = service.claim(ACCOUNT, 10, 2_000L, SESSION, List.of());
-
-        assertEquals(10, result.acceptedTapCount());
-        assertEquals(17L, result.vpGranted());
     }
 
     // ---- timed (tapOffsetsMs) ---------------------------------------------
 
     @Test
     void closeTaps_multiplierClimbs() {
+        stubSession(40_000L);
         stubFreshClaim(99999L);
         List<Long> offs = new ArrayList<>();
         for (int i = 0; i < 20; i++) {
             offs.add(i * 100L);
         }
 
-        EarnVpClaimResponse result = service.claim(ACCOUNT, 20, 40_000L, SESSION, offs);
+        EarnVpClaimResponse result = service.claim(ACCOUNT, 20, SESSION, offs);
 
         assertEquals(20, result.acceptedTapCount());
         assertEquals(36L, result.vpGranted());
     }
 
     @Test
-    void farApartTaps_decayKeepsMultiplierLow() {
-        stubFreshClaim(99999L);
-        List<Long> offs = new ArrayList<>();
-        for (int i = 0; i < 20; i++) {
-            offs.add(i * 2_000L);
-        }
-
-        EarnVpClaimResponse result = service.claim(ACCOUNT, 20, 40_000L, SESSION, offs);
-
-        assertEquals(20, result.acceptedTapCount());
-        assertEquals(32L, result.vpGranted());
-        assertTrue(result.vpGranted() < 36L);
-    }
-
-    @Test
-    void longIdleGap_clampsMultiplierTowardOne() {
-        stubFreshClaim(99999L);
-
-        EarnVpClaimResponse result = service.claim(ACCOUNT, 4, 6_000L, SESSION, offsets(0, 100, 200, 5200));
-
-        assertEquals(4, result.acceptedTapCount());
-        assertEquals(6L, result.vpGranted());
-    }
-
-    @Test
     void offsetsFewerThanTapCount_cannotGrantExtraTaps() {
+        stubSession(10_000L);
         stubFreshClaim(99999L);
 
-        EarnVpClaimResponse result = service.claim(ACCOUNT, 37, 10_000L, SESSION, offsets(0, 300, 1200, 1500, 9000));
+        EarnVpClaimResponse result = service.claim(ACCOUNT, 37, SESSION, offsets(0, 300, 1200, 1500, 9000));
 
         assertEquals(5, result.acceptedTapCount());
         assertEquals(8L, result.vpGranted());
     }
 
     @Test
-    void negativeOffsets_areIgnored() {
-        stubFreshClaim(99999L);
-
-        EarnVpClaimResponse result = service.claim(ACCOUNT, 5, 100_000L, SESSION, offsets(-50, 0, 100, -10, 200));
-
-        assertEquals(3, result.acceptedTapCount());
-        assertEquals(4L, result.vpGranted());
-    }
-
-    @Test
-    void offsetsBeyondDuration_areClamped() {
-        stubFreshClaim(99999L);
-
-        EarnVpClaimResponse result = service.claim(ACCOUNT, 3, 1_000L, SESSION, offsets(0, 500, 5000));
-
-        assertEquals(3, result.acceptedTapCount());
-        assertEquals(4L, result.vpGranted());
-    }
-
-    @Test
-    void unsortedOffsets_areNormalized() {
-        stubFreshClaim(99999L);
-
-        EarnVpClaimResponse result = service.claim(ACCOUNT, 3, 100_000L, SESSION, offsets(200, 0, 100));
-
-        assertEquals(3, result.acceptedTapCount());
-        assertEquals(4L, result.vpGranted());
-    }
-
-    @Test
-    void timedClaim_respectsTenPerSecondCap() {
-        stubFreshClaim(99999L);
-        List<Long> offs = new ArrayList<>();
-        for (int i = 0; i < 50; i++) {
-            offs.add(i * 20L);
-        }
-
-        EarnVpClaimResponse result = service.claim(ACCOUNT, 1_000_000, 1_000L, SESSION, offs);
-
-        assertEquals(10, result.acceptedTapCount());
-        assertEquals(17L, result.vpGranted());
-    }
-
-    @Test
     void timedClaim_respectsMaxTapCap() {
+        stubSession(300_000L);
         stubFreshClaim(99999L);
         List<Long> offs = new ArrayList<>();
         for (int i = 0; i < 3000; i++) {
             offs.add(i * 100L);
         }
 
-        EarnVpClaimResponse result = service.claim(ACCOUNT, 1_000_000, 300_000L, SESSION, offs);
+        EarnVpClaimResponse result = service.claim(ACCOUNT, 1_000_000, SESSION, offs);
 
         assertEquals(2400, result.acceptedTapCount());
         assertEquals(11286L, result.vpGranted());
     }
 
-    // ---- caps / guards / idempotency / throttle ---------------------------
+    // ---- server-authoritative timing & caps -------------------------------
 
     @Test
-    void hugeTapCount_isClampedToTapRateForDuration() {
+    void immediateClaimAfterStart_grantsNoFullReward() {
+        stubSession(0L);
+        stubFreshClaim(10000L);
+
+        EarnVpClaimResponse result = service.claim(ACCOUNT, 1_000_000, SESSION, null);
+
+        assertEquals(0, result.acceptedTapCount());
+        assertEquals(0L, result.vpGranted());
+    }
+
+    @Test
+    void clientCannotExceedServerElapsedTapBudget() {
+        stubSession(2_000L);
         stubFreshClaim(99999L);
 
-        EarnVpClaimResponse result = service.claim(ACCOUNT, 1_000_000, 8500L, SESSION, null);
+        EarnVpClaimResponse result = service.claim(ACCOUNT, 1_000_000, SESSION, null);
+
+        assertEquals(20, result.acceptedTapCount());
+    }
+
+    @Test
+    void maxDurationSession_capsAt2400Taps() {
+        stubSession(9_999_999L);
+        stubFreshClaim(99999L);
+
+        EarnVpClaimResponse result = service.claim(ACCOUNT, 1_000_000, SESSION, null);
+
+        assertEquals(2400, result.acceptedTapCount());
+        assertEquals(11358L, result.vpGranted());
+    }
+
+    @Test
+    void hugeTapCount_isClampedToServerElapsedRate() {
+        stubSession(8_500L);
+        stubFreshClaim(99999L);
+
+        EarnVpClaimResponse result = service.claim(ACCOUNT, 1_000_000, SESSION, null);
 
         assertEquals(85, result.acceptedTapCount());
         assertEquals(250L, result.vpGranted());
     }
 
     @Test
-    void maxDurationSession_capsAt2400Taps() {
-        stubFreshClaim(99999L);
+    void successfulClaim_creditsWalletExactlyOnce() {
+        stubSession(2_000L);
+        stubFreshClaim(10017L);
 
-        EarnVpClaimResponse result = service.claim(ACCOUNT, 1_000_000, 9_999_999L, SESSION, null);
+        service.claim(ACCOUNT, 10, SESSION, null);
 
-        assertEquals(2400, result.acceptedTapCount());
-        assertEquals(11358L, result.vpGranted());
+        verify(walletService, times(1)).credit(eq(ACCOUNT), eq(17L), eq(EarnVpService.REASON_EARN_VP), any());
+    }
+
+    // ---- guards / idempotency / throttle ----------------------------------
+
+    @Test
+    void unknownOrUnstartedSession_throws400_andDoesNotCredit() {
+        when(earnVpClaimRepository.findByAccountIdAndClientSessionId(ACCOUNT, SESSION)).thenReturn(Optional.empty());
+        when(earnVpSessionRepository.findByIdAndAccountId(SESSION_ID, ACCOUNT)).thenReturn(Optional.empty());
+
+        ApiException ex = assertThrows(ApiException.class, () -> service.claim(ACCOUNT, 24, SESSION, null));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        verify(walletService, never()).credit(any(), anyLong(), any(), any());
     }
 
     @Test
@@ -256,7 +272,7 @@ class EarnVpServiceTest {
         when(walletService.getWalletForAccount(ACCOUNT))
                 .thenReturn(new WalletResponse(ACCOUNT.toString(), 3520L, Instant.now(), null));
 
-        EarnVpClaimResponse result = service.claim(ACCOUNT, 10, 8500L, SESSION, offsets(0, 100, 200));
+        EarnVpClaimResponse result = service.claim(ACCOUNT, 10, SESSION, offsets(0, 100, 200));
 
         assertEquals("DUPLICATE", result.message());
         assertEquals(17L, result.vpGranted());
@@ -268,30 +284,25 @@ class EarnVpServiceTest {
 
     @Test
     void nonPositiveTapCount_throws400() {
-        ApiException ex = assertThrows(ApiException.class, () -> service.claim(ACCOUNT, 0, 8500L, SESSION, null));
+        ApiException ex = assertThrows(ApiException.class, () -> service.claim(ACCOUNT, 0, SESSION, null));
         assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
         verify(walletService, never()).credit(any(), anyLong(), any(), any());
     }
 
     @Test
-    void nonPositiveDuration_throws400() {
-        ApiException ex = assertThrows(ApiException.class, () -> service.claim(ACCOUNT, 24, 0L, SESSION, null));
-        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
-    }
-
-    @Test
     void blankSessionId_throws400() {
-        ApiException ex = assertThrows(ApiException.class, () -> service.claim(ACCOUNT, 24, 8500L, "  ", null));
+        ApiException ex = assertThrows(ApiException.class, () -> service.claim(ACCOUNT, 24, "  ", null));
         assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
     }
 
     @Test
     void claimWithinOneSecondOfLast_throws429() {
+        stubSession(8_500L);
         when(earnVpClaimRepository.findByAccountIdAndClientSessionId(ACCOUNT, SESSION)).thenReturn(Optional.empty());
         when(earnVpClaimRepository.findTopByAccountIdOrderByCreatedAtDesc(ACCOUNT))
                 .thenReturn(Optional.of(existingClaim(10, 17L)));
 
-        ApiException ex = assertThrows(ApiException.class, () -> service.claim(ACCOUNT, 24, 8500L, SESSION, null));
+        ApiException ex = assertThrows(ApiException.class, () -> service.claim(ACCOUNT, 24, SESSION, null));
         assertEquals(HttpStatus.TOO_MANY_REQUESTS, ex.getStatus());
         verify(walletService, never()).credit(any(), anyLong(), any(), any());
     }

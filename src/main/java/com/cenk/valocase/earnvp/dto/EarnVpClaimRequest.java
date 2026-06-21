@@ -4,8 +4,10 @@ import java.util.List;
 
 /**
  * Client-reported Earn VP session. The reward is never derived from any
- * client-supplied amount; only these signals are accepted. tapOffsetsMs is
- * optional per-tap timing (ms from session start) used for multiplier/decay.
+ * client-supplied amount; duration comes from the server session start, so
+ * {@code sessionDurationMs} is accepted for compatibility but ignored.
+ * {@code clientSessionId} must be the id returned by session start. tapOffsetsMs
+ * is optional per-tap timing (ms from session start) used for multiplier/decay.
  */
 public record EarnVpClaimRequest(
         Integer tapCount,

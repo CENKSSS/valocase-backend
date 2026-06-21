@@ -2,6 +2,7 @@ package com.cenk.valocase.earnvp.service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -18,8 +19,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.cenk.valocase.common.exception.ApiException;
 import com.cenk.valocase.earnvp.domain.EarnVpClaim;
+import com.cenk.valocase.earnvp.domain.EarnVpSession;
 import com.cenk.valocase.earnvp.dto.EarnVpClaimResponse;
+import com.cenk.valocase.earnvp.dto.EarnVpSessionResponse;
 import com.cenk.valocase.earnvp.repository.EarnVpClaimRepository;
+import com.cenk.valocase.earnvp.repository.EarnVpSessionRepository;
 import com.cenk.valocase.mission.event.MissionEventTypes;
 import com.cenk.valocase.mission.event.MissionProgressEvent;
 import com.cenk.valocase.wallet.service.WalletService;
@@ -27,8 +31,9 @@ import com.cenk.valocase.wallet.service.WalletService;
 import lombok.RequiredArgsConstructor;
 
 /**
- * Server-authoritative Earn VP. The client reports taps and duration only; the
- * backend caps the tap rate, computes the reward, and grants it through the
+ * Server-authoritative Earn VP. A session is started server-side first; the claim
+ * derives elapsed duration from the recorded start time (client-reported duration
+ * is ignored), caps the tap rate, computes the reward, and grants it through the
  * wallet. A claim and its credit commit together; the unique
  * (account_id, client_session_id) constraint prevents a double grant.
  */
@@ -51,31 +56,46 @@ public class EarnVpService {
     private static final BigDecimal IDLE_VERY_FAST_AFTER_SEC = new BigDecimal("1.75");
 
     static final int MAX_TAP_RATE_PER_SECOND = 10;
-    static final long MIN_DURATION_MS = 1_000L;
     static final long MAX_DURATION_MS = 240_000L;
     static final int MAX_TAPS_PER_CLAIM = MAX_TAP_RATE_PER_SECOND * (int) (MAX_DURATION_MS / 1_000L);
     static final long MIN_CLAIM_INTERVAL_MS = 1_000L;
     static final int MAX_SESSION_ID_LENGTH = 100;
 
     private final EarnVpClaimRepository earnVpClaimRepository;
+    private final EarnVpSessionRepository earnVpSessionRepository;
     private final WalletService walletService;
     private final ApplicationEventPublisher eventPublisher;
+    private final Clock clock;
 
     @Transactional
-    public EarnVpClaimResponse claim(UUID accountId, Integer tapCount, Long sessionDurationMs,
+    public EarnVpSessionResponse startSession(UUID accountId) {
+        Instant now = Instant.now(clock);
+        EarnVpSession session = new EarnVpSession();
+        session.setAccountId(accountId);
+        session.setStartedAt(now);
+        session.setCreatedAt(now);
+        session = earnVpSessionRepository.saveAndFlush(session);
+        return new EarnVpSessionResponse(
+                session.getId().toString(), now.toEpochMilli(),
+                MAX_DURATION_MS, MAX_TAP_RATE_PER_SECOND, MAX_TAPS_PER_CLAIM);
+    }
+
+    @Transactional
+    public EarnVpClaimResponse claim(UUID accountId, Integer tapCount,
                                      String clientSessionId, List<Long> tapOffsetsMs) {
         String sessionId = normalizeSessionId(clientSessionId);
-        validate(tapCount, sessionDurationMs);
+        validate(tapCount);
 
         Optional<EarnVpClaim> existing = earnVpClaimRepository.findByAccountIdAndClientSessionId(accountId, sessionId);
         if (existing.isPresent()) {
             return duplicateResponse(accountId, existing.get());
         }
 
+        long serverDurationMs = elapsedMs(requireSession(accountId, sessionId));
         enforceRateLimit(accountId);
 
-        int cappedTaps = acceptedTaps(tapCount, sessionDurationMs);
-        List<Long> offsets = sanitizeOffsets(tapOffsetsMs, sessionDurationMs);
+        int cappedTaps = acceptedTaps(tapCount, serverDurationMs);
+        List<Long> offsets = sanitizeOffsets(tapOffsetsMs, serverDurationMs);
 
         int acceptedTapCount;
         long vpGranted;
@@ -92,7 +112,7 @@ public class EarnVpService {
         claim.setClientSessionId(sessionId);
         claim.setTapCountAccepted(acceptedTapCount);
         claim.setVpGranted(vpGranted);
-        claim.setCreatedAt(Instant.now());
+        claim.setCreatedAt(Instant.now(clock));
         try {
             earnVpClaimRepository.saveAndFlush(claim);
         } catch (DataIntegrityViolationException e) {
@@ -159,15 +179,32 @@ public class EarnVpService {
         return cleaned;
     }
 
-    private int acceptedTaps(int tapCount, long sessionDurationMs) {
-        long clampedDurationMs = Math.min(Math.max(sessionDurationMs, MIN_DURATION_MS), MAX_DURATION_MS);
-        int perDurationCap = (int) (MAX_TAP_RATE_PER_SECOND * clampedDurationMs / 1_000L);
+    // Server elapsed is authoritative; client-reported duration is never used.
+    private int acceptedTaps(int tapCount, long serverDurationMs) {
+        long boundedMs = Math.min(serverDurationMs, MAX_DURATION_MS);
+        int perDurationCap = (int) (MAX_TAP_RATE_PER_SECOND * boundedMs / 1_000L);
         return Math.min(tapCount, Math.min(perDurationCap, MAX_TAPS_PER_CLAIM));
+    }
+
+    private EarnVpSession requireSession(UUID accountId, String sessionId) {
+        UUID id;
+        try {
+            id = UUID.fromString(sessionId);
+        } catch (IllegalArgumentException e) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Earn VP session not started; start a session first");
+        }
+        return earnVpSessionRepository.findByIdAndAccountId(id, accountId)
+                .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST,
+                        "Earn VP session not started; start a session first"));
+    }
+
+    private long elapsedMs(EarnVpSession session) {
+        return Math.max(0L, Duration.between(session.getStartedAt(), Instant.now(clock)).toMillis());
     }
 
     private void enforceRateLimit(UUID accountId) {
         earnVpClaimRepository.findTopByAccountIdOrderByCreatedAtDesc(accountId).ifPresent(last -> {
-            if (Duration.between(last.getCreatedAt(), Instant.now()).toMillis() < MIN_CLAIM_INTERVAL_MS) {
+            if (Duration.between(last.getCreatedAt(), Instant.now(clock)).toMillis() < MIN_CLAIM_INTERVAL_MS) {
                 throw new ApiException(HttpStatus.TOO_MANY_REQUESTS, "Earn VP claims are too frequent; wait a moment");
             }
         });
@@ -189,12 +226,9 @@ public class EarnVpService {
         return trimmed;
     }
 
-    private void validate(Integer tapCount, Long sessionDurationMs) {
+    private void validate(Integer tapCount) {
         if (tapCount == null || tapCount <= 0) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "tapCount must be positive");
-        }
-        if (sessionDurationMs == null || sessionDurationMs <= 0) {
-            throw new ApiException(HttpStatus.BAD_REQUEST, "sessionDurationMs must be positive");
         }
     }
 }
