@@ -1,6 +1,6 @@
 package com.cenk.valocase.adreward.repository;
 
-import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -19,22 +19,20 @@ public interface AdRewardClaimRepository extends JpaRepository<AdRewardClaim, UU
     Optional<AdRewardClaim> findByAccountIdAndRewardTypeAndAdToken(
             UUID accountId, AdRewardType rewardType, String adToken);
 
-    Optional<AdRewardClaim> findTopByAccountIdAndRewardTypeOrderByCreatedAtDesc(
-            UUID accountId, AdRewardType rewardType);
-
-    int countByAccountIdAndRewardTypeAndCreatedAtGreaterThanEqual(
-            UUID accountId, AdRewardType rewardType, Instant since);
-
-    Optional<AdRewardClaim> findTopByAccountIdAndRewardTypeAndConsumedFalseOrderByCreatedAtDesc(
-            UUID accountId, AdRewardType rewardType);
-
     boolean existsByAccountIdAndRewardTypeAndSourceRef(
             UUID accountId, AdRewardType rewardType, String sourceRef);
 
-    /** Locks the account's active upgrade buff so consume serializes with concurrent upgrades. */
+    boolean existsByAccountIdAndRewardTypeAndConsumedFalse(
+            UUID accountId, AdRewardType rewardType);
+
+    Optional<AdRewardClaim> findByAccountIdAndRewardTypeAndSourceRefAndConsumedFalse(
+            UUID accountId, AdRewardType rewardType, String sourceRef);
+
+    /** Locks the unconsumed upgrade buff for a context so consume serializes with concurrent upgrades. */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select c from AdRewardClaim c where c.accountId = :accountId "
             + "and c.rewardType = com.cenk.valocase.adreward.domain.AdRewardType.UPGRADE_PLUS_5 "
-            + "and c.consumed = false order by c.createdAt desc")
-    java.util.List<AdRewardClaim> findActiveUpgradeBuffsForUpdate(@Param("accountId") UUID accountId);
+            + "and c.sourceRef = :contextKey and c.consumed = false")
+    List<AdRewardClaim> findActiveUpgradeBuffForContextForUpdate(
+            @Param("accountId") UUID accountId, @Param("contextKey") String contextKey);
 }

@@ -1,12 +1,12 @@
 package com.cenk.valocase.adreward.service;
 
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.dao.DataIntegrityViolationException;
@@ -16,25 +16,28 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.cenk.valocase.adreward.domain.AdRewardClaim;
 import com.cenk.valocase.adreward.domain.AdRewardType;
+import com.cenk.valocase.adreward.dto.AdRewardClaimRequest;
 import com.cenk.valocase.adreward.dto.AdRewardClaimResponse;
+import com.cenk.valocase.adreward.dto.AdRewardPlacementStatus;
 import com.cenk.valocase.adreward.dto.AdRewardStatusResponse;
-import com.cenk.valocase.adreward.dto.AdRewardTypeStatus;
-import com.cenk.valocase.adreward.dto.UpgradeBuffStateResponse;
 import com.cenk.valocase.adreward.repository.AdRewardClaimRepository;
+import com.cenk.valocase.catalog.domain.Skin;
+import com.cenk.valocase.catalog.repository.SkinRepository;
 import com.cenk.valocase.common.exception.ApiException;
-import com.cenk.valocase.earnvp.domain.EarnVpClaim;
-import com.cenk.valocase.earnvp.repository.EarnVpClaimRepository;
-import com.cenk.valocase.wallet.service.WalletService;
+import com.cenk.valocase.earnvp.domain.EarnVpSession;
+import com.cenk.valocase.earnvp.repository.EarnVpSessionRepository;
+import com.cenk.valocase.inventory.domain.InventoryItem;
+import com.cenk.valocase.inventory.repository.InventoryItemRepository;
+import com.cenk.valocase.upgrade.service.UpgradeContextKey;
 
 import lombok.RequiredArgsConstructor;
 
 /**
- * Server-authoritative rewarded-ad rewards. The client never supplies the reward
- * amount, eligibility, or remaining count: EARN_VP_2X doubles the player's last
- * server-recorded Earn VP grant through the wallet, and UPGRADE_PLUS_5 issues a
- * single unconsumed upgrade-chance buff that the upgrade flow reads and consumes.
- * Limits and cooldowns come from {@link AdRewardPolicy}; the unique
- * (account, reward_type, ad_token) constraint blocks replaying the same ad.
+ * Server-authoritative rewarded-ad rewards with no daily limits. EARN_VP_2X arms a
+ * 2x bonus on the player's current Earn VP session (the existing earn claim applies
+ * and clears it; the client never sets VP amounts). UPGRADE_PLUS_5 issues a single
+ * +5 buff bound to a server-derived upgrade context, consumed by the matching
+ * upgrade attempt; the same context can never be buffed twice and buffs do not stack.
  *
  * Ad-network verification is not integrated yet: {@code adToken} is accepted as-is
  * and is the seam where server-side ad validation will be added.
@@ -43,66 +46,69 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class AdRewardService {
 
-    public static final String REASON_EARN_VP_2X = "AD_REWARD_EARN_VP_2X";
-
-    public static final String CODE_NOTHING_TO_DOUBLE = "AD_REWARD_NOTHING_TO_DOUBLE";
-    public static final String CODE_ALREADY_DOUBLED = "AD_REWARD_ALREADY_DOUBLED";
-    public static final String CODE_BUFF_ALREADY_ACTIVE = "AD_REWARD_BUFF_ALREADY_ACTIVE";
-    public static final String CODE_ON_COOLDOWN = "AD_REWARD_ON_COOLDOWN";
-    public static final String CODE_DAILY_LIMIT = "AD_REWARD_DAILY_LIMIT_REACHED";
+    public static final String CODE_EARN_VP_2X_ACTIVE = "EARN_VP_2X_ALREADY_ACTIVE";
+    public static final String CODE_UPGRADE_CONTEXT_USED = "UPGRADE_PLUS_5_ALREADY_USED_FOR_CONTEXT";
+    public static final String CODE_NO_EARN_SESSION = "EARN_VP_NO_ACTIVE_SESSION";
 
     static final int MAX_AD_TOKEN_LENGTH = 100;
 
     private final AdRewardClaimRepository adRewardClaimRepository;
-    private final EarnVpClaimRepository earnVpClaimRepository;
-    private final WalletService walletService;
+    private final EarnVpSessionRepository earnVpSessionRepository;
+    private final InventoryItemRepository inventoryItemRepository;
+    private final SkinRepository skinRepository;
     private final AdRewardPolicy policy;
     private final Clock clock;
 
     @Transactional(readOnly = true)
-    public AdRewardStatusResponse getStatus(UUID accountId) {
-        Instant now = Instant.now(clock);
-        List<AdRewardTypeStatus> rewards = new ArrayList<>();
-        for (AdRewardType type : AdRewardType.values()) {
-            rewards.add(typeStatus(accountId, type, now));
-        }
-        return new AdRewardStatusResponse(rewards, upgradeBuffState(accountId));
+    public AdRewardStatusResponse getStatus(UUID accountId, String earnSessionId,
+                                            List<String> inputItemIds, List<String> targetSkinIds) {
+        return new AdRewardStatusResponse(List.of(
+                earnVp2xStatus(accountId, earnSessionId),
+                upgradePlus5Status(accountId, inputItemIds, targetSkinIds)));
     }
 
     @Transactional
-    public AdRewardClaimResponse claim(UUID accountId, AdRewardType type, String rawAdToken) {
-        String adToken = normalizeAdToken(rawAdToken);
-        Instant now = Instant.now(clock);
+    public AdRewardClaimResponse claim(UUID accountId, AdRewardType type, AdRewardClaimRequest request) {
+        String adToken = normalizeAdToken(request.adToken());
 
         Optional<AdRewardClaim> existing =
                 adRewardClaimRepository.findByAccountIdAndRewardTypeAndAdToken(accountId, type, adToken);
         if (existing.isPresent()) {
-            return duplicateResponse(accountId, type, existing.get(), now);
+            return duplicateResponse(accountId, type, request);
         }
 
-        enforceCooldown(accountId, type, now);
-        enforceDailyLimit(accountId, type, now);
-
         return switch (type) {
-            case EARN_VP_2X -> claimEarnVp2x(accountId, adToken, now);
-            case UPGRADE_PLUS_5 -> claimUpgradeBuff(accountId, adToken, now);
+            case EARN_VP_2X -> activateEarnVp2x(accountId, adToken, request.earnSessionId());
+            case UPGRADE_PLUS_5 -> claimUpgradeBuff(accountId, adToken, request);
         };
     }
 
-    /** Buff size the active upgrade buff would add, without consuming it. Used by preview. */
+    @Transactional
+    public AdRewardClaimResponse clearEarnVp2x(UUID accountId, String earnSessionId) {
+        EarnVpSession session = resolveEarnSessionForUpdate(accountId, earnSessionId);
+        if (session != null && session.isBonus2xActive()) {
+            session.setBonus2xActive(false);
+            earnVpSessionRepository.save(session);
+        }
+        return new AdRewardClaimResponse(
+                AdRewardType.EARN_VP_2X.name(), "CLEARED", false, false, true, null);
+    }
+
+    /** Buff the matching upgrade context would add, without consuming it. Used by preview. */
     @Transactional(readOnly = true)
-    public double peekActiveUpgradeBuffPercent(UUID accountId) {
+    public double peekUpgradeBuffPercentForContext(UUID accountId, String contextKey) {
         return adRewardClaimRepository
-                .findTopByAccountIdAndRewardTypeAndConsumedFalseOrderByCreatedAtDesc(
-                        accountId, AdRewardType.UPGRADE_PLUS_5)
-                .map(AdRewardClaim::getBuffPercent)
+                .findByAccountIdAndRewardTypeAndSourceRefAndConsumedFalse(
+                        accountId, AdRewardType.UPGRADE_PLUS_5, contextKey)
+                .map(c -> c.getBuffPercent() != null ? c.getBuffPercent() : 0.0)
                 .orElse(0.0);
     }
 
-    /** Marks the active upgrade buff consumed and returns its size; 0 when none. Joins the caller's transaction. */
+    /** Consumes the buff bound to a context and returns its size; 0 when none. Joins the caller's transaction. */
     @Transactional
-    public double consumeActiveUpgradeBuff(UUID accountId) {
-        List<AdRewardClaim> active = adRewardClaimRepository.findActiveUpgradeBuffsForUpdate(accountId);
+    public double consumeUpgradeBuffForContext(UUID accountId, String contextKey) {
+        List<AdRewardClaim> active =
+                adRewardClaimRepository.findActiveUpgradeBuffForContextForUpdate(accountId, contextKey);
         if (active.isEmpty()) {
             return 0.0;
         }
@@ -113,138 +119,222 @@ public class AdRewardService {
         return buff.getBuffPercent() != null ? buff.getBuffPercent() : 0.0;
     }
 
-    private AdRewardClaimResponse claimEarnVp2x(UUID accountId, String adToken, Instant now) {
-        EarnVpClaim last = earnVpClaimRepository.findTopByAccountIdOrderByCreatedAtDesc(accountId)
-                .orElseThrow(() -> new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
-                        "No recent Earn VP to double", CODE_NOTHING_TO_DOUBLE));
-
-        long bonus = last.getVpGranted();
-        if (bonus <= 0) {
+    private AdRewardClaimResponse activateEarnVp2x(UUID accountId, String adToken, String earnSessionId) {
+        EarnVpSession session = resolveEarnSessionForUpdate(accountId, earnSessionId);
+        if (session == null) {
             throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
-                    "No recent Earn VP to double", CODE_NOTHING_TO_DOUBLE);
+                    "Start an Earn VP session before claiming the 2x bonus", CODE_NO_EARN_SESSION);
         }
-
-        String sourceRef = last.getId().toString();
-        if (adRewardClaimRepository.existsByAccountIdAndRewardTypeAndSourceRef(
-                accountId, AdRewardType.EARN_VP_2X, sourceRef)) {
+        if (session.isBonus2xActive()) {
             throw new ApiException(HttpStatus.CONFLICT,
-                    "This Earn VP session was already doubled", CODE_ALREADY_DOUBLED);
+                    "A 2x Earn VP bonus is already active", CODE_EARN_VP_2X_ACTIVE);
         }
 
+        session.setBonus2xActive(true);
+        earnVpSessionRepository.save(session);
+
+        Instant now = Instant.now(clock);
         AdRewardClaim claim = new AdRewardClaim();
         claim.setAccountId(accountId);
         claim.setRewardType(AdRewardType.EARN_VP_2X);
         claim.setAdToken(adToken);
-        claim.setGrantedVp(bonus);
         claim.setConsumed(true);
-        claim.setSourceRef(sourceRef);
+        claim.setSourceRef(session.getId().toString());
         claim.setCreatedAt(now);
         claim.setConsumedAt(now);
         try {
             adRewardClaimRepository.saveAndFlush(claim);
         } catch (DataIntegrityViolationException e) {
-            AdRewardClaim raced = adRewardClaimRepository
-                    .findByAccountIdAndRewardTypeAndAdToken(accountId, AdRewardType.EARN_VP_2X, adToken)
-                    .orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "Duplicate ad reward claim"));
-            return duplicateResponse(accountId, AdRewardType.EARN_VP_2X, raced, now);
+            return duplicateEarnVp2x(session);
         }
 
-        long newBalance = walletService.credit(accountId, bonus, REASON_EARN_VP_2X, claim.getId()).getVpBalance();
-        AdRewardTypeStatus status = typeStatus(accountId, AdRewardType.EARN_VP_2X, now);
-        return new AdRewardClaimResponse(AdRewardType.EARN_VP_2X.name(), "OK", bonus, newBalance,
-                null, status.remainingToday(), status.cooldownRemainingSeconds());
+        return new AdRewardClaimResponse(AdRewardType.EARN_VP_2X.name(), "OK",
+                true, false, false, CODE_EARN_VP_2X_ACTIVE);
     }
 
-    private AdRewardClaimResponse claimUpgradeBuff(UUID accountId, String adToken, Instant now) {
-        if (peekActiveUpgradeBuffPercent(accountId) > 0.0) {
+    private AdRewardClaimResponse claimUpgradeBuff(UUID accountId, String adToken, AdRewardClaimRequest request) {
+        String contextKey = resolveUpgradeContextKey(accountId, request.inputItemIds(), mergeTargetSkinIds(request));
+        if (adRewardClaimRepository.existsByAccountIdAndRewardTypeAndSourceRef(
+                accountId, AdRewardType.UPGRADE_PLUS_5, contextKey)) {
             throw new ApiException(HttpStatus.CONFLICT,
-                    "An upgrade buff is already active; use it before watching another ad",
-                    CODE_BUFF_ALREADY_ACTIVE);
+                    "This upgrade selection was already buffed", CODE_UPGRADE_CONTEXT_USED);
         }
 
-        double buffPercent = policy.upgradeBuffPercent();
         AdRewardClaim claim = new AdRewardClaim();
         claim.setAccountId(accountId);
         claim.setRewardType(AdRewardType.UPGRADE_PLUS_5);
         claim.setAdToken(adToken);
-        claim.setBuffPercent(buffPercent);
+        claim.setBuffPercent(policy.upgradeBuffPercent());
         claim.setConsumed(false);
-        claim.setCreatedAt(now);
+        claim.setSourceRef(contextKey);
+        claim.setCreatedAt(Instant.now(clock));
         try {
             adRewardClaimRepository.saveAndFlush(claim);
         } catch (DataIntegrityViolationException e) {
-            AdRewardClaim raced = adRewardClaimRepository
-                    .findByAccountIdAndRewardTypeAndAdToken(accountId, AdRewardType.UPGRADE_PLUS_5, adToken)
-                    .orElseThrow(() -> new ApiException(HttpStatus.CONFLICT, "Duplicate ad reward claim"));
-            return duplicateResponse(accountId, AdRewardType.UPGRADE_PLUS_5, raced, now);
+            return new AdRewardClaimResponse(AdRewardType.UPGRADE_PLUS_5.name(), "DUPLICATE",
+                    false, true, false, CODE_UPGRADE_CONTEXT_USED);
         }
 
-        AdRewardTypeStatus status = typeStatus(accountId, AdRewardType.UPGRADE_PLUS_5, now);
-        return new AdRewardClaimResponse(AdRewardType.UPGRADE_PLUS_5.name(), "OK", 0L, null,
-                new UpgradeBuffStateResponse(true, buffPercent, now),
-                status.remainingToday(), status.cooldownRemainingSeconds());
+        return new AdRewardClaimResponse(AdRewardType.UPGRADE_PLUS_5.name(), "OK",
+                false, true, false, CODE_UPGRADE_CONTEXT_USED);
     }
 
-    private AdRewardClaimResponse duplicateResponse(UUID accountId, AdRewardType type,
-                                                    AdRewardClaim claim, Instant now) {
-        AdRewardTypeStatus status = typeStatus(accountId, type, now);
-        long vpGranted = claim.getGrantedVp() != null ? claim.getGrantedVp() : 0L;
-        Long balance = type == AdRewardType.EARN_VP_2X
-                ? walletService.getWalletForAccount(accountId).vpBalance() : null;
-        UpgradeBuffStateResponse buff = type == AdRewardType.UPGRADE_PLUS_5
-                ? upgradeBuffState(accountId) : null;
-        return new AdRewardClaimResponse(type.name(), "DUPLICATE", vpGranted, balance, buff,
-                status.remainingToday(), status.cooldownRemainingSeconds());
-    }
-
-    private AdRewardTypeStatus typeStatus(UUID accountId, AdRewardType type, Instant now) {
-        int dailyLimit = policy.dailyLimit(type);
-        int remaining = Math.max(0, dailyLimit - usedToday(accountId, type, now));
-        long cooldownRemaining = cooldownRemaining(accountId, type, now);
-
-        boolean available = remaining > 0 && cooldownRemaining == 0;
-        if (type == AdRewardType.UPGRADE_PLUS_5 && peekActiveUpgradeBuffPercent(accountId) > 0.0) {
-            available = false;
+    private AdRewardClaimResponse duplicateResponse(UUID accountId, AdRewardType type, AdRewardClaimRequest request) {
+        if (type == AdRewardType.EARN_VP_2X) {
+            boolean active = resolveEarnSession(accountId, request.earnSessionId())
+                    .map(EarnVpSession::isBonus2xActive).orElse(false);
+            return new AdRewardClaimResponse(type.name(), "DUPLICATE", active, false,
+                    !active, active ? CODE_EARN_VP_2X_ACTIVE : null);
         }
-        return new AdRewardTypeStatus(type.name(), available, remaining, dailyLimit, cooldownRemaining);
+        String contextKey = tryComputeUpgradeContextKey(request.inputItemIds(), mergeTargetSkinIdsLenient(request));
+        boolean used = contextKey != null && adRewardClaimRepository
+                .existsByAccountIdAndRewardTypeAndSourceRef(accountId, AdRewardType.UPGRADE_PLUS_5, contextKey);
+        boolean active = contextKey != null && adRewardClaimRepository
+                .findByAccountIdAndRewardTypeAndSourceRefAndConsumedFalse(
+                        accountId, AdRewardType.UPGRADE_PLUS_5, contextKey).isPresent();
+        return new AdRewardClaimResponse(type.name(), "DUPLICATE", false, active,
+                !used, used ? CODE_UPGRADE_CONTEXT_USED : null);
     }
 
-    private UpgradeBuffStateResponse upgradeBuffState(UUID accountId) {
-        return adRewardClaimRepository
-                .findTopByAccountIdAndRewardTypeAndConsumedFalseOrderByCreatedAtDesc(
-                        accountId, AdRewardType.UPGRADE_PLUS_5)
-                .map(buff -> new UpgradeBuffStateResponse(
-                        true,
-                        buff.getBuffPercent() != null ? buff.getBuffPercent() : 0.0,
-                        buff.getCreatedAt()))
-                .orElseGet(UpgradeBuffStateResponse::inactive);
+    private AdRewardClaimResponse duplicateEarnVp2x(EarnVpSession session) {
+        boolean active = session.isBonus2xActive();
+        return new AdRewardClaimResponse(AdRewardType.EARN_VP_2X.name(), "DUPLICATE", active, false,
+                !active, active ? CODE_EARN_VP_2X_ACTIVE : null);
     }
 
-    private int usedToday(UUID accountId, AdRewardType type, Instant now) {
-        Instant dayStart = now.truncatedTo(ChronoUnit.DAYS);
-        return adRewardClaimRepository
-                .countByAccountIdAndRewardTypeAndCreatedAtGreaterThanEqual(accountId, type, dayStart);
+    private AdRewardPlacementStatus earnVp2xStatus(UUID accountId, String earnSessionId) {
+        boolean active = resolveEarnSession(accountId, earnSessionId)
+                .map(EarnVpSession::isBonus2xActive).orElse(false);
+        return new AdRewardPlacementStatus(AdRewardType.EARN_VP_2X.name(), !active,
+                active ? CODE_EARN_VP_2X_ACTIVE : null, active, false, false, 0L);
     }
 
-    private long cooldownRemaining(UUID accountId, AdRewardType type, Instant now) {
-        return adRewardClaimRepository.findTopByAccountIdAndRewardTypeOrderByCreatedAtDesc(accountId, type)
-                .map(last -> Math.max(0L,
-                        policy.cooldownSeconds(type) - Duration.between(last.getCreatedAt(), now).getSeconds()))
-                .orElse(0L);
+    private AdRewardPlacementStatus upgradePlus5Status(UUID accountId, List<String> inputItemIds,
+                                                       List<String> targetSkinIds) {
+        String contextKey = tryComputeUpgradeContextKey(inputItemIds, targetSkinIds);
+        if (contextKey == null) {
+            boolean anyActive = adRewardClaimRepository
+                    .existsByAccountIdAndRewardTypeAndConsumedFalse(accountId, AdRewardType.UPGRADE_PLUS_5);
+            return new AdRewardPlacementStatus(AdRewardType.UPGRADE_PLUS_5.name(), true, null,
+                    false, anyActive, false, 0L);
+        }
+        boolean active = adRewardClaimRepository
+                .findByAccountIdAndRewardTypeAndSourceRefAndConsumedFalse(
+                        accountId, AdRewardType.UPGRADE_PLUS_5, contextKey).isPresent();
+        boolean used = adRewardClaimRepository
+                .existsByAccountIdAndRewardTypeAndSourceRef(accountId, AdRewardType.UPGRADE_PLUS_5, contextKey);
+        return new AdRewardPlacementStatus(AdRewardType.UPGRADE_PLUS_5.name(), !used,
+                used ? CODE_UPGRADE_CONTEXT_USED : null, false, active, used, 0L);
     }
 
-    private void enforceCooldown(UUID accountId, AdRewardType type, Instant now) {
-        long remaining = cooldownRemaining(accountId, type, now);
-        if (remaining > 0) {
-            throw new ApiException(HttpStatus.TOO_MANY_REQUESTS,
-                    "Ad reward on cooldown; " + remaining + "s remaining", CODE_ON_COOLDOWN);
+    private EarnVpSession resolveEarnSessionForUpdate(UUID accountId, String rawSessionId) {
+        UUID id;
+        if (rawSessionId != null && !rawSessionId.isBlank()) {
+            id = parseUuid(rawSessionId, "earnSessionId");
+        } else {
+            id = earnVpSessionRepository.findTopByAccountIdOrderByCreatedAtDesc(accountId)
+                    .map(EarnVpSession::getId).orElse(null);
+            if (id == null) {
+                return null;
+            }
+        }
+        return earnVpSessionRepository.findByIdAndAccountIdForUpdate(id, accountId).orElse(null);
+    }
+
+    private Optional<EarnVpSession> resolveEarnSession(UUID accountId, String rawSessionId) {
+        if (rawSessionId != null && !rawSessionId.isBlank()) {
+            try {
+                return earnVpSessionRepository.findByIdAndAccountId(UUID.fromString(rawSessionId.trim()), accountId);
+            } catch (IllegalArgumentException e) {
+                return Optional.empty();
+            }
+        }
+        return earnVpSessionRepository.findTopByAccountIdOrderByCreatedAtDesc(accountId);
+    }
+
+    private String resolveUpgradeContextKey(UUID accountId, List<String> rawInputItemIds, List<String> targetSkinIds) {
+        Set<UUID> itemIds = parseInputItemIds(rawInputItemIds);
+        List<String> targets = validateTargets(targetSkinIds);
+
+        List<InventoryItem> owned = inventoryItemRepository.findByIdInAndAccountId(itemIds, accountId);
+        if (owned.size() != itemIds.size()) {
+            throw new ApiException(HttpStatus.NOT_FOUND,
+                    "One or more input items are not owned or no longer available");
+        }
+        List<Skin> skins = skinRepository.findAllById(targets);
+        if (skins.size() != targets.size() || skins.stream().anyMatch(s -> !s.isActive())) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "One or more target skins are not available");
+        }
+        return UpgradeContextKey.compute(itemIds, targets);
+    }
+
+    private String tryComputeUpgradeContextKey(List<String> rawInputItemIds, List<String> targetSkinIds) {
+        if (rawInputItemIds == null || rawInputItemIds.isEmpty()
+                || targetSkinIds == null || targetSkinIds.isEmpty()) {
+            return null;
+        }
+        try {
+            Set<UUID> itemIds = parseInputItemIds(rawInputItemIds);
+            List<String> targets = validateTargets(targetSkinIds);
+            return UpgradeContextKey.compute(itemIds, targets);
+        } catch (ApiException e) {
+            return null;
         }
     }
 
-    private void enforceDailyLimit(UUID accountId, AdRewardType type, Instant now) {
-        if (usedToday(accountId, type, now) >= policy.dailyLimit(type)) {
-            throw new ApiException(HttpStatus.CONFLICT,
-                    "Daily ad reward limit reached for " + type.name(), CODE_DAILY_LIMIT);
+    private Set<UUID> parseInputItemIds(List<String> rawInputItemIds) {
+        if (rawInputItemIds == null || rawInputItemIds.isEmpty()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "inputItemIds must not be empty");
+        }
+        Set<UUID> ids = new LinkedHashSet<>();
+        for (String raw : rawInputItemIds) {
+            if (raw == null || raw.isBlank()) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "inputItemIds contains a blank id");
+            }
+            ids.add(parseUuid(raw, "inputItemId"));
+        }
+        return ids;
+    }
+
+    private List<String> validateTargets(List<String> targetSkinIds) {
+        if (targetSkinIds == null || targetSkinIds.isEmpty()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "targetSkinIds must not be empty");
+        }
+        Set<String> distinct = new LinkedHashSet<>();
+        for (String raw : targetSkinIds) {
+            if (raw == null || raw.isBlank()) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "targetSkinIds contains a blank id");
+            }
+            distinct.add(raw.trim());
+        }
+        return new ArrayList<>(distinct);
+    }
+
+    private List<String> mergeTargetSkinIds(AdRewardClaimRequest request) {
+        if (request.targetSkinIds() != null && !request.targetSkinIds().isEmpty()) {
+            return request.targetSkinIds();
+        }
+        if (request.targetSkinId() != null && !request.targetSkinId().isBlank()) {
+            return List.of(request.targetSkinId());
+        }
+        throw new ApiException(HttpStatus.BAD_REQUEST, "targetSkinIds must not be empty");
+    }
+
+    private List<String> mergeTargetSkinIdsLenient(AdRewardClaimRequest request) {
+        if (request.targetSkinIds() != null && !request.targetSkinIds().isEmpty()) {
+            return request.targetSkinIds();
+        }
+        if (request.targetSkinId() != null && !request.targetSkinId().isBlank()) {
+            return List.of(request.targetSkinId());
+        }
+        return List.of();
+    }
+
+    private UUID parseUuid(String raw, String field) {
+        try {
+            return UUID.fromString(raw.trim());
+        } catch (IllegalArgumentException e) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Invalid " + field + ": " + raw);
         }
     }
 

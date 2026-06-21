@@ -86,7 +86,9 @@ public class UpgradeService {
                     CODE_UPGRADE_NOT_POSSIBLE);
         }
 
-        double adBuffPercent = adRewardService.consumeActiveUpgradeBuff(accountId);
+        String contextKey = UpgradeContextKey.compute(
+                items.stream().map(InventoryItem::getId).toList(), targetSkinIds);
+        double adBuffPercent = adRewardService.consumeUpgradeBuffForContext(accountId, contextKey);
         double chance = chanceCalculator.computeChance(
                 inputValue, targetValue, v.targetIsMelee(), v.meleeInputCount(), adBuffPercent);
         boolean success = chanceCalculator.roll(chance);
@@ -172,7 +174,9 @@ public class UpgradeService {
                     false, 0.0, CODE_UPGRADE_NOT_POSSIBLE, v.inputValue(), v.targetValue(), 0.0);
         }
 
-        double adBuffPercent = adRewardService.peekActiveUpgradeBuffPercent(accountId);
+        String contextKey = UpgradeContextKey.compute(
+                v.items().stream().map(InventoryItem::getId).toList(), v.targetSkinIds());
+        double adBuffPercent = adRewardService.peekUpgradeBuffPercentForContext(accountId, contextKey);
         double chance = chanceCalculator.computeChance(
                 v.inputValue(), v.targetValue(), v.targetIsMelee(), v.meleeInputCount(), adBuffPercent);
         return new UpgradePreviewResponse(true, chance, null, v.inputValue(), v.targetValue(), adBuffPercent);

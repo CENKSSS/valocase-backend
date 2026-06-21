@@ -91,7 +91,8 @@ public class EarnVpService {
             return duplicateResponse(accountId, existing.get());
         }
 
-        long serverDurationMs = elapsedMs(requireSession(accountId, sessionId));
+        EarnVpSession session = requireSession(accountId, sessionId);
+        long serverDurationMs = elapsedMs(session);
         enforceRateLimit(accountId);
 
         int cappedTaps = acceptedTaps(tapCount, serverDurationMs);
@@ -105,6 +106,12 @@ public class EarnVpService {
         } else {
             acceptedTapCount = Math.min(cappedTaps, offsets.size());
             vpGranted = computeTimedReward(offsets.subList(0, acceptedTapCount));
+        }
+
+        if (session.isBonus2xActive()) {
+            vpGranted *= 2L;
+            session.setBonus2xActive(false);
+            earnVpSessionRepository.save(session);
         }
 
         EarnVpClaim claim = new EarnVpClaim();
