@@ -1,5 +1,7 @@
 package com.cenk.valocase.earnvp.repository;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -16,7 +18,12 @@ public interface EarnVpSessionRepository extends JpaRepository<EarnVpSession, UU
 
     Optional<EarnVpSession> findByIdAndAccountId(UUID id, UUID accountId);
 
-    Optional<EarnVpSession> findTopByAccountIdOrderByCreatedAtDesc(UUID accountId);
+    Optional<EarnVpSession> findFirstByAccountIdAndBonus2xExpiresAtAfterOrderByBonus2xExpiresAtDesc(
+            UUID accountId, Instant now);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select s from EarnVpSession s where s.accountId = :accountId")
+    List<EarnVpSession> findByAccountIdForUpdate(@Param("accountId") UUID accountId);
 
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select s from EarnVpSession s where s.id = :id and s.accountId = :accountId")

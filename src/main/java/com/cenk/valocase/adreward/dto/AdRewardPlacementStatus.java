@@ -14,6 +14,7 @@ public record AdRewardPlacementStatus(
         boolean earnVp2xActive,
         boolean upgradePlus5Active,
         boolean upgradePlus5AlreadyUsedForCurrentContext,
-        long cooldownRemainingSeconds
+        long cooldownRemainingSeconds,
+        long earnVp2xRemainingSeconds
 ) {
 }

@@ -108,10 +108,8 @@ public class EarnVpService {
             vpGranted = computeTimedReward(offsets.subList(0, acceptedTapCount));
         }
 
-        if (session.isBonus2xActive()) {
+        if (isBonus2xActive(session, Instant.now(clock))) {
             vpGranted *= 2L;
-            session.setBonus2xActive(false);
-            earnVpSessionRepository.save(session);
         }
 
         EarnVpClaim claim = new EarnVpClaim();
@@ -203,6 +201,10 @@ public class EarnVpService {
         return earnVpSessionRepository.findByIdAndAccountId(id, accountId)
                 .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST,
                         "Earn VP session not started; start a session first"));
+    }
+
+    private boolean isBonus2xActive(EarnVpSession session, Instant now) {
+        return session.getBonus2xExpiresAt() != null && now.isBefore(session.getBonus2xExpiresAt());
     }
 
     private long elapsedMs(EarnVpSession session) {

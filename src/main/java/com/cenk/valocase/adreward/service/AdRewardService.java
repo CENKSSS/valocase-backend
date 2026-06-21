@@ -1,6 +1,7 @@
 package com.cenk.valocase.adreward.service;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -34,8 +35,8 @@ import lombok.RequiredArgsConstructor;
 
 /**
  * Server-authoritative rewarded-ad rewards with no daily limits. EARN_VP_2X arms a
- * 2x bonus on the player's current Earn VP session (the existing earn claim applies
- * and clears it; the client never sets VP amounts). UPGRADE_PLUS_5 issues a single
+ * timed 2x bonus on the player's current Earn VP session; the client never sets VP
+ * amounts. UPGRADE_PLUS_5 issues a single
  * +5 buff bound to a server-derived upgrade context, consumed by the matching
  * upgrade attempt; the same context can never be buffed twice and buffs do not stack.
  *
@@ -51,6 +52,7 @@ public class AdRewardService {
     public static final String CODE_NO_EARN_SESSION = "EARN_VP_NO_ACTIVE_SESSION";
 
     static final int MAX_AD_TOKEN_LENGTH = 100;
+    static final Duration EARN_VP_2X_WINDOW = Duration.ofMinutes(3);
 
     private final AdRewardClaimRepository adRewardClaimRepository;
     private final EarnVpSessionRepository earnVpSessionRepository;
@@ -85,13 +87,14 @@ public class AdRewardService {
 
     @Transactional
     public AdRewardClaimResponse clearEarnVp2x(UUID accountId, String earnSessionId) {
-        EarnVpSession session = resolveEarnSessionForUpdate(accountId, earnSessionId);
-        if (session != null && session.isBonus2xActive()) {
+        EarnVpSession session = requireEarnSessionForUpdate(accountId, earnSessionId);
+        if (session.isBonus2xActive() || session.getBonus2xExpiresAt() != null) {
             session.setBonus2xActive(false);
+            session.setBonus2xExpiresAt(null);
             earnVpSessionRepository.save(session);
         }
         return new AdRewardClaimResponse(
-                AdRewardType.EARN_VP_2X.name(), "CLEARED", false, false, true, null);
+                AdRewardType.EARN_VP_2X.name(), "CLEARED", false, false, true, null, 0L);
     }
 
     /** Buff the matching upgrade context would add, without consuming it. Used by preview. */
@@ -120,20 +123,27 @@ public class AdRewardService {
     }
 
     private AdRewardClaimResponse activateEarnVp2x(UUID accountId, String adToken, String earnSessionId) {
-        EarnVpSession session = resolveEarnSessionForUpdate(accountId, earnSessionId);
-        if (session == null) {
-            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
-                    "Start an Earn VP session before claiming the 2x bonus", CODE_NO_EARN_SESSION);
-        }
-        if (session.isBonus2xActive()) {
+        UUID sessionId = requireEarnSessionId(earnSessionId);
+        Instant now = Instant.now(clock);
+        List<EarnVpSession> sessions = earnVpSessionRepository.findByAccountIdForUpdate(accountId);
+        EarnVpSession session = sessions.stream()
+                .filter(s -> sessionId.equals(s.getId()))
+                .findFirst()
+                .orElseThrow(() -> new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
+                        "Start an Earn VP session before claiming the 2x bonus", CODE_NO_EARN_SESSION));
+
+        Optional<EarnVpSession> activeSession = sessions.stream()
+                .filter(s -> isBonus2xActive(s, now))
+                .findFirst();
+        if (activeSession.isPresent()) {
             throw new ApiException(HttpStatus.CONFLICT,
                     "A 2x Earn VP bonus is already active", CODE_EARN_VP_2X_ACTIVE);
         }
 
         session.setBonus2xActive(true);
+        session.setBonus2xExpiresAt(now.plus(EARN_VP_2X_WINDOW));
         earnVpSessionRepository.save(session);
 
-        Instant now = Instant.now(clock);
         AdRewardClaim claim = new AdRewardClaim();
         claim.setAccountId(accountId);
         claim.setRewardType(AdRewardType.EARN_VP_2X);
@@ -149,7 +159,7 @@ public class AdRewardService {
         }
 
         return new AdRewardClaimResponse(AdRewardType.EARN_VP_2X.name(), "OK",
-                true, false, false, CODE_EARN_VP_2X_ACTIVE);
+                true, false, false, CODE_EARN_VP_2X_ACTIVE, remainingSeconds(session, now));
     }
 
     private AdRewardClaimResponse claimUpgradeBuff(UUID accountId, String adToken, AdRewardClaimRequest request) {
@@ -172,19 +182,20 @@ public class AdRewardService {
             adRewardClaimRepository.saveAndFlush(claim);
         } catch (DataIntegrityViolationException e) {
             return new AdRewardClaimResponse(AdRewardType.UPGRADE_PLUS_5.name(), "DUPLICATE",
-                    false, true, false, CODE_UPGRADE_CONTEXT_USED);
+                    false, true, false, CODE_UPGRADE_CONTEXT_USED, 0L);
         }
 
         return new AdRewardClaimResponse(AdRewardType.UPGRADE_PLUS_5.name(), "OK",
-                false, true, false, CODE_UPGRADE_CONTEXT_USED);
+                false, true, false, CODE_UPGRADE_CONTEXT_USED, 0L);
     }
 
     private AdRewardClaimResponse duplicateResponse(UUID accountId, AdRewardType type, AdRewardClaimRequest request) {
         if (type == AdRewardType.EARN_VP_2X) {
-            boolean active = resolveEarnSession(accountId, request.earnSessionId())
-                    .map(EarnVpSession::isBonus2xActive).orElse(false);
+            EarnVpSession session = requireEarnSession(accountId, request.earnSessionId());
+            Instant now = Instant.now(clock);
+            boolean active = isBonus2xActive(session, now);
             return new AdRewardClaimResponse(type.name(), "DUPLICATE", active, false,
-                    !active, active ? CODE_EARN_VP_2X_ACTIVE : null);
+                    !active, active ? CODE_EARN_VP_2X_ACTIVE : null, remainingSeconds(session, now));
         }
         String contextKey = tryComputeUpgradeContextKey(request.inputItemIds(), mergeTargetSkinIdsLenient(request));
         boolean used = contextKey != null && adRewardClaimRepository
@@ -193,20 +204,26 @@ public class AdRewardService {
                 .findByAccountIdAndRewardTypeAndSourceRefAndConsumedFalse(
                         accountId, AdRewardType.UPGRADE_PLUS_5, contextKey).isPresent();
         return new AdRewardClaimResponse(type.name(), "DUPLICATE", false, active,
-                !used, used ? CODE_UPGRADE_CONTEXT_USED : null);
+                !used, used ? CODE_UPGRADE_CONTEXT_USED : null, 0L);
     }
 
     private AdRewardClaimResponse duplicateEarnVp2x(EarnVpSession session) {
-        boolean active = session.isBonus2xActive();
+        Instant now = Instant.now(clock);
+        boolean active = isBonus2xActive(session, now);
         return new AdRewardClaimResponse(AdRewardType.EARN_VP_2X.name(), "DUPLICATE", active, false,
-                !active, active ? CODE_EARN_VP_2X_ACTIVE : null);
+                !active, active ? CODE_EARN_VP_2X_ACTIVE : null, remainingSeconds(session, now));
     }
 
     private AdRewardPlacementStatus earnVp2xStatus(UUID accountId, String earnSessionId) {
-        boolean active = resolveEarnSession(accountId, earnSessionId)
-                .map(EarnVpSession::isBonus2xActive).orElse(false);
+        EarnVpSession session = requireEarnSession(accountId, earnSessionId);
+        Instant now = Instant.now(clock);
+        EarnVpSession statusSession = earnVpSessionRepository
+                .findFirstByAccountIdAndBonus2xExpiresAtAfterOrderByBonus2xExpiresAtDesc(accountId, now)
+                .orElse(session);
+        boolean active = isBonus2xActive(statusSession, now);
         return new AdRewardPlacementStatus(AdRewardType.EARN_VP_2X.name(), !active,
-                active ? CODE_EARN_VP_2X_ACTIVE : null, active, false, false, 0L);
+                active ? CODE_EARN_VP_2X_ACTIVE : null, active, false, false, 0L,
+                remainingSeconds(statusSession, now));
     }
 
     private AdRewardPlacementStatus upgradePlus5Status(UUID accountId, List<String> inputItemIds,
@@ -216,7 +233,7 @@ public class AdRewardService {
             boolean anyActive = adRewardClaimRepository
                     .existsByAccountIdAndRewardTypeAndConsumedFalse(accountId, AdRewardType.UPGRADE_PLUS_5);
             return new AdRewardPlacementStatus(AdRewardType.UPGRADE_PLUS_5.name(), true, null,
-                    false, anyActive, false, 0L);
+                    false, anyActive, false, 0L, 0L);
         }
         boolean active = adRewardClaimRepository
                 .findByAccountIdAndRewardTypeAndSourceRefAndConsumedFalse(
@@ -224,32 +241,41 @@ public class AdRewardService {
         boolean used = adRewardClaimRepository
                 .existsByAccountIdAndRewardTypeAndSourceRef(accountId, AdRewardType.UPGRADE_PLUS_5, contextKey);
         return new AdRewardPlacementStatus(AdRewardType.UPGRADE_PLUS_5.name(), !used,
-                used ? CODE_UPGRADE_CONTEXT_USED : null, false, active, used, 0L);
+                used ? CODE_UPGRADE_CONTEXT_USED : null, false, active, used, 0L, 0L);
     }
 
-    private EarnVpSession resolveEarnSessionForUpdate(UUID accountId, String rawSessionId) {
-        UUID id;
-        if (rawSessionId != null && !rawSessionId.isBlank()) {
-            id = parseUuid(rawSessionId, "earnSessionId");
-        } else {
-            id = earnVpSessionRepository.findTopByAccountIdOrderByCreatedAtDesc(accountId)
-                    .map(EarnVpSession::getId).orElse(null);
-            if (id == null) {
-                return null;
-            }
-        }
-        return earnVpSessionRepository.findByIdAndAccountIdForUpdate(id, accountId).orElse(null);
+    private EarnVpSession requireEarnSessionForUpdate(UUID accountId, String rawSessionId) {
+        UUID id = requireEarnSessionId(rawSessionId);
+        return earnVpSessionRepository.findByIdAndAccountIdForUpdate(id, accountId)
+                .orElseThrow(() -> new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
+                        "Start an Earn VP session before claiming the 2x bonus", CODE_NO_EARN_SESSION));
     }
 
-    private Optional<EarnVpSession> resolveEarnSession(UUID accountId, String rawSessionId) {
-        if (rawSessionId != null && !rawSessionId.isBlank()) {
-            try {
-                return earnVpSessionRepository.findByIdAndAccountId(UUID.fromString(rawSessionId.trim()), accountId);
-            } catch (IllegalArgumentException e) {
-                return Optional.empty();
-            }
+    private EarnVpSession requireEarnSession(UUID accountId, String rawSessionId) {
+        UUID id = requireEarnSessionId(rawSessionId);
+        return earnVpSessionRepository.findByIdAndAccountId(id, accountId)
+                .orElseThrow(() -> new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
+                        "Start an Earn VP session before claiming the 2x bonus", CODE_NO_EARN_SESSION));
+    }
+
+    private UUID requireEarnSessionId(String rawSessionId) {
+        if (rawSessionId == null || rawSessionId.isBlank()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "earnSessionId is required", CODE_NO_EARN_SESSION);
         }
-        return earnVpSessionRepository.findTopByAccountIdOrderByCreatedAtDesc(accountId);
+        return parseUuid(rawSessionId, "earnSessionId");
+    }
+
+    private boolean isBonus2xActive(EarnVpSession session, Instant now) {
+        return session.getBonus2xExpiresAt() != null && now.isBefore(session.getBonus2xExpiresAt());
+    }
+
+    private long remainingSeconds(EarnVpSession session, Instant now) {
+        Instant expiresAt = session.getBonus2xExpiresAt();
+        if (expiresAt == null || !now.isBefore(expiresAt)) {
+            return 0L;
+        }
+        long millis = Duration.between(now, expiresAt).toMillis();
+        return (millis + 999L) / 1_000L;
     }
 
     private String resolveUpgradeContextKey(UUID accountId, List<String> rawInputItemIds, List<String> targetSkinIds) {

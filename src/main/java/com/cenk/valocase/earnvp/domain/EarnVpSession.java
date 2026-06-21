@@ -39,6 +39,9 @@ public class EarnVpSession {
     @Column(name = "bonus2x_active", nullable = false)
     private boolean bonus2xActive;
 
+    @Column(name = "bonus2x_expires_at")
+    private Instant bonus2xExpiresAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 }

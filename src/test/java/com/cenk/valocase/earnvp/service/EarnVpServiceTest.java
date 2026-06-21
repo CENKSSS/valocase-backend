@@ -61,12 +61,13 @@ class EarnVpServiceTest {
     }
 
     /** A session that started {@code durationMs} before the fixed clock's now. */
-    private void stubSession(long durationMs) {
+    private EarnVpSession stubSession(long durationMs) {
         EarnVpSession session = new EarnVpSession();
         session.setId(SESSION_ID);
         session.setAccountId(ACCOUNT);
         session.setStartedAt(NOW.minusMillis(durationMs));
         when(earnVpSessionRepository.findByIdAndAccountId(SESSION_ID, ACCOUNT)).thenReturn(Optional.of(session));
+        return session;
     }
 
     private void stubFreshClaim(long resultingBalance) {
@@ -251,6 +252,43 @@ class EarnVpServiceTest {
         service.claim(ACCOUNT, 10, SESSION, null);
 
         verify(walletService, times(1)).credit(eq(ACCOUNT), eq(17L), eq(EarnVpService.REASON_EARN_VP), any());
+    }
+
+    @Test
+    void active2xWindow_doublesEarnVpClaim() {
+        EarnVpSession session = stubSession(2_000L);
+        session.setBonus2xExpiresAt(NOW.plusSeconds(60));
+        stubFreshClaim(10034L);
+
+        EarnVpClaimResponse result = service.claim(ACCOUNT, 10, SESSION, null);
+
+        assertEquals(34L, result.vpGranted());
+        verify(walletService).credit(eq(ACCOUNT), eq(34L), eq(EarnVpService.REASON_EARN_VP), any());
+    }
+
+    @Test
+    void active2xWindow_isNotConsumedAfterClaim() {
+        EarnVpSession session = stubSession(2_000L);
+        Instant expiresAt = NOW.plusSeconds(60);
+        session.setBonus2xExpiresAt(expiresAt);
+        stubFreshClaim(10034L);
+
+        service.claim(ACCOUNT, 10, SESSION, null);
+
+        assertEquals(expiresAt, session.getBonus2xExpiresAt());
+        verify(earnVpSessionRepository, never()).save(any(EarnVpSession.class));
+    }
+
+    @Test
+    void expired2xWindow_doesNotDoubleEarnVpClaim() {
+        EarnVpSession session = stubSession(2_000L);
+        session.setBonus2xExpiresAt(NOW.minusSeconds(1));
+        stubFreshClaim(10017L);
+
+        EarnVpClaimResponse result = service.claim(ACCOUNT, 10, SESSION, null);
+
+        assertEquals(17L, result.vpGranted());
+        verify(walletService).credit(eq(ACCOUNT), eq(17L), eq(EarnVpService.REASON_EARN_VP), any());
     }
 
     // ---- guards / idempotency / throttle ----------------------------------

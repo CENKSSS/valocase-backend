@@ -12,6 +12,7 @@ public record AdRewardClaimResponse(
         boolean earnVp2xActive,
         boolean upgradePlus5Active,
         boolean isAvailable,
-        String unavailableReason
+        String unavailableReason,
+        long earnVp2xRemainingSeconds
 ) {
 }
