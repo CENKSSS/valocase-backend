@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -55,6 +56,12 @@ class UpgradeServiceTest {
         s.setId(id);
         s.setVpValue(vp);
         s.setActive(active);
+        return s;
+    }
+
+    private static Skin meleeSkin(String id, int vp) {
+        Skin s = skin(id, vp, true);
+        s.setWeapon("Melee");
         return s;
     }
 
@@ -144,7 +151,7 @@ class UpgradeServiceTest {
                 .thenReturn(List.of(item(itemId, "skin_in")));
         when(skinRepository.findAllById(any()))
                 .thenReturn(List.of(skin(TARGET, 5000, true), skin("skin_in", 1000, true)));
-        when(chanceCalculator.computeChance(1000L, 5000L)).thenReturn(20.0);
+        when(chanceCalculator.computeChance(1000L, 5000L, false, 0)).thenReturn(20.0);
         when(chanceCalculator.roll(20.0)).thenReturn(true);
         when(upgradeRepository.saveAndFlush(any(Upgrade.class))).thenAnswer(inv -> {
             Upgrade u = inv.getArgument(0);
@@ -210,7 +217,7 @@ class UpgradeServiceTest {
                 .thenReturn(List.of(item(itemId, "skin_in")));
         when(skinRepository.findAllById(any())).thenReturn(List.of(
                 skin("skin_t1", 3000, true), skin("skin_t2", 3000, true), skin("skin_in", 1000, true)));
-        when(chanceCalculator.computeChance(1000L, 6000L)).thenReturn(20.0);
+        when(chanceCalculator.computeChance(1000L, 6000L, false, 0)).thenReturn(20.0);
         when(chanceCalculator.roll(20.0)).thenReturn(true);
         when(upgradeRepository.saveAndFlush(any(Upgrade.class))).thenAnswer(inv -> {
             Upgrade u = inv.getArgument(0);
@@ -243,7 +250,7 @@ class UpgradeServiceTest {
                 .thenReturn(List.of(item(itemId, "skin_in")));
         when(skinRepository.findAllById(any())).thenReturn(List.of(
                 skin("skin_t1", 3000, true), skin("skin_t2", 3000, true), skin("skin_in", 1000, true)));
-        when(chanceCalculator.computeChance(1000L, 6000L)).thenReturn(20.0);
+        when(chanceCalculator.computeChance(1000L, 6000L, false, 0)).thenReturn(20.0);
         when(chanceCalculator.roll(20.0)).thenReturn(false);
         when(upgradeRepository.saveAndFlush(any(Upgrade.class))).thenAnswer(inv -> {
             Upgrade u = inv.getArgument(0);
@@ -263,6 +270,53 @@ class UpgradeServiceTest {
     }
 
     @Test
+    void inputGreaterThanTarget_blocksCleanly_rollsNothing_consumesNothing_grantsNothing() {
+        UUID itemId = UUID.randomUUID();
+        when(inventoryItemRepository.findForUpdateByIdInAndAccountId(any(), any()))
+                .thenReturn(List.of(item(itemId, "skin_in")));
+        when(skinRepository.findAllById(any()))
+                .thenReturn(List.of(skin(TARGET, 5000, true), skin("skin_in", 8000, true)));
+
+        ApiException ex = assertThrows(ApiException.class,
+                () -> upgradeService.upgrade(ACCOUNT, List.of(itemId.toString()), TARGET));
+
+        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, ex.getStatus());
+        assertEquals(UpgradeService.CODE_UPGRADE_NOT_POSSIBLE, ex.getCode());
+        verify(chanceCalculator, never()).roll(anyDouble());
+        verify(inventoryItemRepository, never()).deleteAll(any());
+        verify(inventoryService, never()).addItem(any(), any(), any(), any());
+    }
+
+    @Test
+    void equalValueAllowed_forwardsMeleeFlags_andDisplayedChanceMatchesRoll() {
+        UUID i1 = UUID.randomUUID();
+        UUID i2 = UUID.randomUUID();
+        UUID upgradeId = UUID.randomUUID();
+
+        when(inventoryItemRepository.findForUpdateByIdInAndAccountId(any(), any()))
+                .thenReturn(List.of(item(i1, "m1"), item(i2, "m2")));
+        when(skinRepository.findAllById(any())).thenReturn(List.of(
+                meleeSkin(TARGET, 10000), meleeSkin("m1", 5000), meleeSkin("m2", 5000)));
+        when(chanceCalculator.computeChance(10000L, 10000L, true, 2)).thenReturn(5.0);
+        when(chanceCalculator.roll(5.0)).thenReturn(false);
+        when(upgradeRepository.saveAndFlush(any(Upgrade.class))).thenAnswer(inv -> {
+            Upgrade u = inv.getArgument(0);
+            u.setId(upgradeId);
+            return u;
+        });
+
+        UpgradeResultResponse result = upgradeService.upgrade(
+                ACCOUNT, List.of(i1.toString(), i2.toString()), TARGET);
+
+        assertFalse(result.success());
+        assertEquals(5.0, result.chance(), 0.0001);
+        verify(chanceCalculator).computeChance(10000L, 10000L, true, 2);
+        verify(chanceCalculator).roll(5.0);
+        verify(inventoryItemRepository).deleteAll(any());
+        verify(inventoryService, never()).addItem(any(), any(), any(), any());
+    }
+
+    @Test
     void failure_consumesInputsButGrantsNothing() {
         UUID itemId = UUID.randomUUID();
         UUID upgradeId = UUID.randomUUID();
@@ -271,7 +325,7 @@ class UpgradeServiceTest {
                 .thenReturn(List.of(item(itemId, "skin_in")));
         when(skinRepository.findAllById(any()))
                 .thenReturn(List.of(skin(TARGET, 5000, true), skin("skin_in", 1000, true)));
-        when(chanceCalculator.computeChance(1000L, 5000L)).thenReturn(20.0);
+        when(chanceCalculator.computeChance(1000L, 5000L, false, 0)).thenReturn(20.0);
         when(chanceCalculator.roll(20.0)).thenReturn(false);
         when(upgradeRepository.saveAndFlush(any(Upgrade.class))).thenAnswer(inv -> {
             Upgrade u = inv.getArgument(0);

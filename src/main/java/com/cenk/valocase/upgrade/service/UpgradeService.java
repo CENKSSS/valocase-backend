@@ -137,15 +137,17 @@ public class UpgradeService {
         long inputValue = items.stream().mapToLong(item -> skinValue(skinsById, item.getSkinId())).sum();
         long targetValue = targetSkinIds.stream().mapToLong(id -> targetsById.get(id).getVpValue()).sum();
 
-        // 8. Total target value must be strictly greater than total input value.
-        if (targetValue <= inputValue) {
+        // 8. Input value must not exceed target value (no downgrade); blocks cleanly.
+        if (inputValue > targetValue) {
             throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
-                    "Target value (" + targetValue + ") must be greater than total input value (" + inputValue + ")",
+                    "Total input value (" + inputValue + ") must not exceed target value (" + targetValue + ")",
                     CODE_UPGRADE_NOT_POSSIBLE);
         }
 
         // 9. Compute chance and roll, server-side.
-        double chance = chanceCalculator.computeChance(inputValue, targetValue);
+        boolean targetIsMelee = targetSkinIds.stream().anyMatch(id -> isMelee(targetsById.get(id)));
+        int meleeInputCount = (int) items.stream().filter(item -> isMelee(skinsById.get(item.getSkinId()))).count();
+        double chance = chanceCalculator.computeChance(inputValue, targetValue, targetIsMelee, meleeInputCount);
         boolean success = chanceCalculator.roll(chance);
 
         // 10. Record the attempt first (gives a stable upgradeId).
@@ -214,5 +216,9 @@ public class UpgradeService {
     private static long skinValue(Map<String, Skin> skinsById, String skinId) {
         Skin skin = skinsById.get(skinId);
         return skin != null ? skin.getVpValue() : 0;
+    }
+
+    private static boolean isMelee(Skin skin) {
+        return skin != null && "Melee".equalsIgnoreCase(skin.getWeapon());
     }
 }
