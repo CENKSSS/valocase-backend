@@ -17,6 +17,7 @@ public record UpgradeResultResponse(
         String targetSkinId,
         List<String> targetSkinIds,
         String grantedInventoryItemId,
-        List<String> grantedInventoryItemIds
+        List<String> grantedInventoryItemIds,
+        double appliedAdBuffPercent
 ) {
 }

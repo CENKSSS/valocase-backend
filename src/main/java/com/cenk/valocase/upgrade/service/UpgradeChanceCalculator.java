@@ -31,12 +31,27 @@ public class UpgradeChanceCalculator {
 
     /** @return the final success chance as a percentage, rounded to 2 decimals. */
     public double computeChance(long inputValue, long targetValue, boolean targetIsMelee, int meleeInputCount) {
+        return computeChance(inputValue, targetValue, targetIsMelee, meleeInputCount, 0.0);
+    }
+
+    /**
+     * Same as {@link #computeChance(long, long, boolean, int)} but adds an ad-buff
+     * bonus (percentage points) before the caps, so the buff cannot push a result
+     * past the global or Melee maximum.
+     *
+     * @return the final success chance as a percentage, rounded to 2 decimals.
+     */
+    public double computeChance(long inputValue, long targetValue, boolean targetIsMelee,
+                                int meleeInputCount, double bonusPercent) {
         if (targetValue <= 0) {
             throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "Invalid target value for upgrade");
         }
         double chance = ((double) inputValue / (double) targetValue) * 100.0 * HOUSE_FACTOR;
         if (meleeInputCount > 1) {
             chance *= MULTI_MELEE_INPUT_FACTOR;
+        }
+        if (bonusPercent > 0.0) {
+            chance += bonusPercent;
         }
         chance = Math.min(chance, GLOBAL_MAX_CHANCE);
         if (targetIsMelee) {

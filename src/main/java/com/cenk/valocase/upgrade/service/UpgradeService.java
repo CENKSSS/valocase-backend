@@ -15,6 +15,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.cenk.valocase.adreward.service.AdRewardService;
 import com.cenk.valocase.catalog.domain.Skin;
 import com.cenk.valocase.catalog.repository.SkinRepository;
 import com.cenk.valocase.common.exception.ApiException;
@@ -56,6 +57,7 @@ public class UpgradeService {
     private final UpgradeTargetRepository upgradeTargetRepository;
     private final InventoryService inventoryService;
     private final UpgradeChanceCalculator chanceCalculator;
+    private final AdRewardService adRewardService;
     private final ApplicationEventPublisher eventPublisher;
 
     /** Backward-compatible single-target entry point. */
@@ -84,8 +86,9 @@ public class UpgradeService {
                     CODE_UPGRADE_NOT_POSSIBLE);
         }
 
+        double adBuffPercent = adRewardService.consumeActiveUpgradeBuff(accountId);
         double chance = chanceCalculator.computeChance(
-                inputValue, targetValue, v.targetIsMelee(), v.meleeInputCount());
+                inputValue, targetValue, v.targetIsMelee(), v.meleeInputCount(), adBuffPercent);
         boolean success = chanceCalculator.roll(chance);
 
         // 10. Record the attempt first (gives a stable upgradeId).
@@ -147,7 +150,8 @@ public class UpgradeService {
                 targetSkinIds.get(0),
                 targetSkinIds,
                 grantedItemIds.isEmpty() ? null : grantedItemIds.get(0),
-                grantedItemIds
+                grantedItemIds,
+                adBuffPercent
         );
     }
 
@@ -164,12 +168,14 @@ public class UpgradeService {
         Valuation v = valuate(accountId, rawInputItemIds, List.of(rawTargetSkinId), false);
 
         if (v.inputValue() > v.targetValue()) {
-            return new UpgradePreviewResponse(false, 0.0, CODE_UPGRADE_NOT_POSSIBLE, v.inputValue(), v.targetValue());
+            return new UpgradePreviewResponse(
+                    false, 0.0, CODE_UPGRADE_NOT_POSSIBLE, v.inputValue(), v.targetValue(), 0.0);
         }
 
+        double adBuffPercent = adRewardService.peekActiveUpgradeBuffPercent(accountId);
         double chance = chanceCalculator.computeChance(
-                v.inputValue(), v.targetValue(), v.targetIsMelee(), v.meleeInputCount());
-        return new UpgradePreviewResponse(true, chance, null, v.inputValue(), v.targetValue());
+                v.inputValue(), v.targetValue(), v.targetIsMelee(), v.meleeInputCount(), adBuffPercent);
+        return new UpgradePreviewResponse(true, chance, null, v.inputValue(), v.targetValue(), adBuffPercent);
     }
 
     private Valuation valuate(UUID accountId, List<String> rawInputItemIds,

@@ -19,6 +19,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 
+import com.cenk.valocase.adreward.service.AdRewardService;
 import com.cenk.valocase.catalog.domain.Skin;
 import com.cenk.valocase.catalog.repository.SkinRepository;
 import com.cenk.valocase.inventory.domain.InventoryItem;
@@ -39,6 +40,7 @@ class UpgradePreviewServiceTest {
     @Mock private UpgradeInputRepository upgradeInputRepository;
     @Mock private UpgradeTargetRepository upgradeTargetRepository;
     @Mock private InventoryService inventoryService;
+    @Mock private AdRewardService adRewardService;
     @Mock private ApplicationEventPublisher eventPublisher;
 
     private final UpgradeChanceCalculator calculator = new UpgradeChanceCalculator(() -> 0.0);
@@ -50,7 +52,8 @@ class UpgradePreviewServiceTest {
     @BeforeEach
     void setUp() {
         upgradeService = new UpgradeService(inventoryItemRepository, skinRepository, upgradeRepository,
-                upgradeInputRepository, upgradeTargetRepository, inventoryService, calculator, eventPublisher);
+                upgradeInputRepository, upgradeTargetRepository, inventoryService, calculator,
+                adRewardService, eventPublisher);
     }
 
     private static Skin skin(String id, int vp, boolean active) {
