@@ -66,6 +66,12 @@ class UpgradeServiceTest {
         return i;
     }
 
+    private static InventoryItem inventoryItem(UUID id) {
+        InventoryItem i = new InventoryItem();
+        i.setId(id);
+        return i;
+    }
+
     @Test
     void emptyInputs_throws400() {
         ApiException ex = assertThrows(ApiException.class,
@@ -159,6 +165,101 @@ class UpgradeServiceTest {
         assertEquals(grantedId.toString(), result.grantedInventoryItemId());
         verify(inventoryItemRepository).deleteAll(any());
         verify(inventoryService).addItem(ACCOUNT, TARGET, UpgradeService.INVENTORY_SOURCE_UPGRADE, null);
+    }
+
+    @Test
+    void partialOwnership_throws404_andConsumesNothing() {
+        UUID owned = UUID.randomUUID();
+        UUID missing = UUID.randomUUID();
+        when(skinRepository.findAllById(any())).thenReturn(List.of(skin(TARGET, 5000, true)));
+        when(inventoryItemRepository.findForUpdateByIdInAndAccountId(any(), any()))
+                .thenReturn(List.of(item(owned, "skin_in")));
+
+        ApiException ex = assertThrows(ApiException.class, () -> upgradeService.upgrade(
+                ACCOUNT, List.of(owned.toString(), missing.toString()), TARGET));
+
+        assertEquals(HttpStatus.NOT_FOUND, ex.getStatus());
+        verify(inventoryItemRepository, never()).deleteAll(any());
+        verify(inventoryService, never()).addItem(any(), any(), any(), any());
+    }
+
+    @Test
+    void blankTarget_throws400() {
+        String id = UUID.randomUUID().toString();
+        ApiException ex = assertThrows(ApiException.class,
+                () -> upgradeService.upgrade(ACCOUNT, List.of(id), List.of("  ")));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+    }
+
+    @Test
+    void duplicateTargets_throws400() {
+        String id = UUID.randomUUID().toString();
+        ApiException ex = assertThrows(ApiException.class,
+                () -> upgradeService.upgrade(ACCOUNT, List.of(id), List.of(TARGET, TARGET)));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+    }
+
+    @Test
+    void multiTargetSuccess_grantsEveryTarget() {
+        UUID itemId = UUID.randomUUID();
+        UUID upgradeId = UUID.randomUUID();
+        UUID granted1 = UUID.randomUUID();
+        UUID granted2 = UUID.randomUUID();
+
+        when(inventoryItemRepository.findForUpdateByIdInAndAccountId(any(), any()))
+                .thenReturn(List.of(item(itemId, "skin_in")));
+        when(skinRepository.findAllById(any())).thenReturn(List.of(
+                skin("skin_t1", 3000, true), skin("skin_t2", 3000, true), skin("skin_in", 1000, true)));
+        when(chanceCalculator.computeChance(1000L, 6000L)).thenReturn(20.0);
+        when(chanceCalculator.roll(20.0)).thenReturn(true);
+        when(upgradeRepository.saveAndFlush(any(Upgrade.class))).thenAnswer(inv -> {
+            Upgrade u = inv.getArgument(0);
+            u.setId(upgradeId);
+            return u;
+        });
+        when(inventoryService.addItem(ACCOUNT, "skin_t1", UpgradeService.INVENTORY_SOURCE_UPGRADE, null))
+                .thenReturn(inventoryItem(granted1));
+        when(inventoryService.addItem(ACCOUNT, "skin_t2", UpgradeService.INVENTORY_SOURCE_UPGRADE, null))
+                .thenReturn(inventoryItem(granted2));
+
+        UpgradeResultResponse result = upgradeService.upgrade(
+                ACCOUNT, List.of(itemId.toString()), List.of("skin_t1", "skin_t2"));
+
+        assertTrue(result.success());
+        assertEquals(List.of("skin_t1", "skin_t2"), result.targetSkinIds());
+        assertEquals(List.of(granted1.toString(), granted2.toString()), result.grantedInventoryItemIds());
+        assertEquals(granted1.toString(), result.grantedInventoryItemId());
+        verify(inventoryItemRepository).deleteAll(any());
+        verify(inventoryService).addItem(ACCOUNT, "skin_t1", UpgradeService.INVENTORY_SOURCE_UPGRADE, null);
+        verify(inventoryService).addItem(ACCOUNT, "skin_t2", UpgradeService.INVENTORY_SOURCE_UPGRADE, null);
+    }
+
+    @Test
+    void multiTargetFailure_grantsNothing_butConsumesInputs() {
+        UUID itemId = UUID.randomUUID();
+        UUID upgradeId = UUID.randomUUID();
+
+        when(inventoryItemRepository.findForUpdateByIdInAndAccountId(any(), any()))
+                .thenReturn(List.of(item(itemId, "skin_in")));
+        when(skinRepository.findAllById(any())).thenReturn(List.of(
+                skin("skin_t1", 3000, true), skin("skin_t2", 3000, true), skin("skin_in", 1000, true)));
+        when(chanceCalculator.computeChance(1000L, 6000L)).thenReturn(20.0);
+        when(chanceCalculator.roll(20.0)).thenReturn(false);
+        when(upgradeRepository.saveAndFlush(any(Upgrade.class))).thenAnswer(inv -> {
+            Upgrade u = inv.getArgument(0);
+            u.setId(upgradeId);
+            return u;
+        });
+
+        UpgradeResultResponse result = upgradeService.upgrade(
+                ACCOUNT, List.of(itemId.toString()), List.of("skin_t1", "skin_t2"));
+
+        assertFalse(result.success());
+        assertTrue(result.grantedInventoryItemIds().isEmpty());
+        assertNull(result.grantedInventoryItemId());
+        assertEquals(List.of(itemId.toString()), result.consumedItemIds());
+        verify(inventoryItemRepository).deleteAll(any());
+        verify(inventoryService, never()).addItem(any(), any(), any(), any());
     }
 
     @Test
