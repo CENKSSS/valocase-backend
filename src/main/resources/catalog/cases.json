@@ -691,11 +691,11 @@
             "rarityWeights": [
                 {
                     "rarity": "Select",
-                    "weight": 35.0
+                    "weight": 62.5
                 },
                 {
                     "rarity": "Deluxe",
-                    "weight": 20.0
+                    "weight": 25.0
                 },
                 {
                     "rarity": "Premium",
@@ -711,7 +711,7 @@
                 },
                 {
                     "rarity": "Melee",
-                    "weight": 45.0
+                    "weight": 12.5
                 }
             ],
             "manualDropPool": [
@@ -1072,14 +1072,14 @@
         {
             "caseId": "melee_basic",
             "displayName": "Basic Melee Case",
-            "price": 1350,
+            "price": 1550,
             "resourceKey": "Art/Cases/Basic_Melee_Case",
             "enabled": true,
             "themeColor": "#66B2FF",
             "rarityWeights": [
                 {
                     "rarity": "Select",
-                    "weight": 75.0
+                    "weight": 80.0
                 },
                 {
                     "rarity": "Deluxe",
@@ -1099,7 +1099,7 @@
                 },
                 {
                     "rarity": "Melee",
-                    "weight": 10.0
+                    "weight": 5.0
                 }
             ],
             "manualDropPool": [
@@ -1457,18 +1457,18 @@
         {
             "caseId": "melee_protocol",
             "displayName": "Protocol Melee Case",
-            "price": 1650,
+            "price": 1850,
             "resourceKey": "Art/Cases/Protocol_Melee_Case",
             "enabled": true,
             "themeColor": "#F8FF0E",
             "rarityWeights": [
                 {
                     "rarity": "Select",
-                    "weight": 55.0
+                    "weight": 73.0
                 },
                 {
                     "rarity": "Deluxe",
-                    "weight": 27.5
+                    "weight": 19.0
                 },
                 {
                     "rarity": "Premium",
@@ -1484,7 +1484,7 @@
                 },
                 {
                     "rarity": "Melee",
-                    "weight": 17.5
+                    "weight": 8.0
                 }
             ],
             "manualDropPool": [
@@ -1842,18 +1842,18 @@
         {
             "caseId": "melee_radiant",
             "displayName": "Radiant Melee Case",
-            "price": 2000,
+            "price": 2150,
             "resourceKey": "Art/Cases/Radiant_Melee_Case",
             "enabled": true,
             "themeColor": "#B21212",
             "rarityWeights": [
                 {
                     "rarity": "Select",
-                    "weight": 47.0
+                    "weight": 67.0
                 },
                 {
                     "rarity": "Deluxe",
-                    "weight": 25.0
+                    "weight": 23.0
                 },
                 {
                     "rarity": "Premium",
@@ -1869,7 +1869,7 @@
                 },
                 {
                     "rarity": "Melee",
-                    "weight": 28.0
+                    "weight": 10.0
                 }
             ],
             "manualDropPool": [
