@@ -18,9 +18,12 @@ import com.cenk.valocase.caseopening.dto.WonSkinResponse;
 import com.cenk.valocase.caseopening.repository.CaseOpeningRepository;
 import com.cenk.valocase.catalog.domain.CaseDefinition;
 import com.cenk.valocase.catalog.domain.CaseEntry;
+import com.cenk.valocase.catalog.domain.CaseRarityWeight;
 import com.cenk.valocase.catalog.domain.Skin;
+import com.cenk.valocase.caseopening.service.CaseRarityRoll.RarityBucket;
 import com.cenk.valocase.catalog.repository.CaseDefinitionRepository;
 import com.cenk.valocase.catalog.repository.CaseEntryRepository;
+import com.cenk.valocase.catalog.repository.CaseRarityWeightRepository;
 import com.cenk.valocase.catalog.repository.SkinRepository;
 import com.cenk.valocase.account.domain.Account;
 import com.cenk.valocase.account.repository.AccountRepository;
@@ -52,11 +55,13 @@ public class CaseOpeningService {
 
     private final CaseDefinitionRepository caseDefinitionRepository;
     private final CaseEntryRepository caseEntryRepository;
+    private final CaseRarityWeightRepository caseRarityWeightRepository;
     private final SkinRepository skinRepository;
     private final WalletService walletService;
     private final InventoryService inventoryService;
     private final CaseOpeningRepository caseOpeningRepository;
     private final DropSelector dropSelector;
+    private final CaseRarityRoll caseRarityRoll;
     private final ApplicationEventPublisher eventPublisher;
     private final AccountRepository accountRepository;
     private final ProgressionService progressionService;
@@ -105,8 +110,13 @@ public class CaseOpeningService {
                     "Case has no valid (active) drop entries: " + caseId);
         }
 
-        // 6. Weighted random selection from the eligible pool.
-        CaseEntry winningEntry = dropSelector.selectWeighted(candidates);
+        // 6. Rarity-first selection by authored weights; flat per-skin fallback when
+        // the case has no usable rarity-weight model.
+        List<CaseRarityWeight> rarityWeights = caseRarityWeightRepository.findByCaseId(caseId);
+        List<RarityBucket> buckets = caseRarityRoll.activeBuckets(candidates, skinsById, rarityWeights);
+        CaseEntry winningEntry = buckets.isEmpty()
+                ? dropSelector.selectWeighted(candidates)
+                : caseRarityRoll.select(buckets);
         Skin wonSkin = skinsById.get(winningEntry.getSkinId());
         if (wonSkin == null || !wonSkin.isActive()) {
             // Defensive: selection should only return eligible entries.

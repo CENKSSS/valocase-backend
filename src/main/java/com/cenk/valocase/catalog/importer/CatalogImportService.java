@@ -19,9 +19,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.cenk.valocase.catalog.domain.CaseDefinition;
 import com.cenk.valocase.catalog.domain.CaseEntry;
+import com.cenk.valocase.catalog.domain.CaseRarityWeight;
 import com.cenk.valocase.catalog.domain.Skin;
 import com.cenk.valocase.catalog.repository.CaseDefinitionRepository;
 import com.cenk.valocase.catalog.repository.CaseEntryRepository;
+import com.cenk.valocase.catalog.repository.CaseRarityWeightRepository;
 import com.cenk.valocase.catalog.repository.SkinRepository;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.type.TypeReference;
@@ -54,6 +56,7 @@ public class CatalogImportService {
     private final SkinRepository skinRepository;
     private final CaseDefinitionRepository caseDefinitionRepository;
     private final CaseEntryRepository caseEntryRepository;
+    private final CaseRarityWeightRepository caseRarityWeightRepository;
 
     /**
      * Imports the catalog from classpath resources. Returns empty (no-op) if the
@@ -224,6 +227,7 @@ public class CatalogImportService {
         // Replace each case's drop pool: clear old entries, then insert the current pool.
         int entryCount = 0;
         List<CaseEntry> newEntries = new ArrayList<>();
+        List<CaseRarityWeight> newWeights = new ArrayList<>();
         for (CaseCatalogEntry c : cases) {
             caseEntryRepository.deleteEntriesByCaseId(c.getCaseId());
             for (PoolEntry pe : pools.getOrDefault(c.getCaseId(), List.of())) {
@@ -234,9 +238,13 @@ public class CatalogImportService {
                 newEntries.add(entry);
                 entryCount++;
             }
+            caseRarityWeightRepository.deleteByCaseId(c.getCaseId());
+            newWeights.addAll(toRarityWeights(c));
         }
         caseEntryRepository.saveAll(newEntries);
         caseEntryRepository.flush();
+        caseRarityWeightRepository.saveAll(newWeights);
+        caseRarityWeightRepository.flush();
 
         int neutralized = neutralizeSampleData();
 
@@ -253,6 +261,27 @@ public class CatalogImportService {
         s.setImageRef(e.getResourceKey());
         s.setActive(e.isEnabled());
         return s;
+    }
+
+    private List<CaseRarityWeight> toRarityWeights(CaseCatalogEntry c) {
+        List<CaseCatalogEntry.RarityWeight> authored = c.getRarityWeights();
+        if (authored == null || authored.isEmpty()) {
+            log.warn("Case '{}' has no rarityWeights; rarity-first roll will fall back to flat per-skin odds.",
+                    c.getCaseId());
+            return List.of();
+        }
+        List<CaseRarityWeight> weights = new ArrayList<>(authored.size());
+        for (CaseCatalogEntry.RarityWeight rw : authored) {
+            if (rw.getRarity() == null || rw.getRarity().isBlank()) {
+                continue;
+            }
+            CaseRarityWeight weight = new CaseRarityWeight();
+            weight.setCaseId(c.getCaseId());
+            weight.setRarity(rw.getRarity());
+            weight.setWeight(rw.getWeight());
+            weights.add(weight);
+        }
+        return weights;
     }
 
     private CaseDefinition toCaseEntity(CaseCatalogEntry e) {

@@ -29,4 +29,14 @@ public class CaseCatalogEntry {
     private String resourceKey;
     private boolean enabled;
     private List<Object> manualDropPool;
+    private List<RarityWeight> rarityWeights;
+
+    @Getter
+    @Setter
+    @NoArgsConstructor
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    public static class RarityWeight {
+        private String rarity;
+        private double weight;
+    }
 }

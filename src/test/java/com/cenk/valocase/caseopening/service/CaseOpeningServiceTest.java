@@ -26,11 +26,14 @@ import com.cenk.valocase.account.repository.AccountRepository;
 import com.cenk.valocase.caseopening.domain.CaseOpening;
 import com.cenk.valocase.caseopening.dto.OpenCaseResultResponse;
 import com.cenk.valocase.caseopening.repository.CaseOpeningRepository;
+import com.cenk.valocase.caseopening.service.CaseRarityRoll.RarityBucket;
 import com.cenk.valocase.catalog.domain.CaseDefinition;
 import com.cenk.valocase.catalog.domain.CaseEntry;
+import com.cenk.valocase.catalog.domain.CaseRarityWeight;
 import com.cenk.valocase.catalog.domain.Skin;
 import com.cenk.valocase.catalog.repository.CaseDefinitionRepository;
 import com.cenk.valocase.catalog.repository.CaseEntryRepository;
+import com.cenk.valocase.catalog.repository.CaseRarityWeightRepository;
 import com.cenk.valocase.catalog.repository.SkinRepository;
 import com.cenk.valocase.common.exception.ApiException;
 import com.cenk.valocase.inventory.domain.InventoryItem;
@@ -45,11 +48,13 @@ class CaseOpeningServiceTest {
 
     @Mock private CaseDefinitionRepository caseDefinitionRepository;
     @Mock private CaseEntryRepository caseEntryRepository;
+    @Mock private CaseRarityWeightRepository caseRarityWeightRepository;
     @Mock private SkinRepository skinRepository;
     @Mock private WalletService walletService;
     @Mock private InventoryService inventoryService;
     @Mock private CaseOpeningRepository caseOpeningRepository;
     @Mock private DropSelector dropSelector;
+    @Mock private CaseRarityRoll caseRarityRoll;
     @Mock private ApplicationEventPublisher eventPublisher;
     @Mock private AccountRepository accountRepository;
     @Spy private ProgressionService progressionService = new ProgressionService();
@@ -222,5 +227,47 @@ class CaseOpeningServiceTest {
 
         assertEquals(10000L, result.newVpBalance());
         verify(walletService, never()).debit(any(), org.mockito.ArgumentMatchers.anyLong(), any(), any());
+    }
+
+    @Test
+    void rarityFirst_whenWeightsExist_selectsViaRarityRoll_notFlatPool() {
+        String skinId = "skin_melee_one";
+        CaseEntry winning = entry(skinId, 1);
+        UUID openingId = UUID.randomUUID();
+        UUID itemId = UUID.randomUUID();
+
+        when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(true, 500)));
+        when(accountRepository.findById(ACCOUNT_ID)).thenReturn(Optional.of(unlockedAccount()));
+        when(caseEntryRepository.findByCaseIdOrderBySkinIdAsc(CASE_ID)).thenReturn(List.of(winning));
+        when(skinRepository.findAllById(any())).thenReturn(List.of(skin(skinId, true)));
+
+        CaseRarityWeight melee = new CaseRarityWeight();
+        melee.setCaseId(CASE_ID);
+        melee.setRarity("Melee");
+        melee.setWeight(28.0);
+        when(caseRarityWeightRepository.findByCaseId(CASE_ID)).thenReturn(List.of(melee));
+        RarityBucket bucket = new RarityBucket("Melee", 28.0, 1.0, List.of(winning));
+        when(caseRarityRoll.activeBuckets(any(), any(), any())).thenReturn(List.of(bucket));
+        when(caseRarityRoll.select(List.of(bucket))).thenReturn(winning);
+
+        when(caseOpeningRepository.save(any(CaseOpening.class))).thenAnswer(inv -> {
+            CaseOpening o = inv.getArgument(0);
+            o.setId(openingId);
+            return o;
+        });
+        Wallet wallet = new Wallet();
+        wallet.setVpBalance(9500L);
+        when(walletService.debit(ACCOUNT_ID, 500L, CaseOpeningService.REASON_CASE_OPEN, openingId)).thenReturn(wallet);
+        InventoryItem item = new InventoryItem();
+        item.setId(itemId);
+        when(inventoryService.addItem(ACCOUNT_ID, skinId, InventoryService.SOURCE_CASE_OPENING, openingId))
+                .thenReturn(item);
+
+        OpenCaseResultResponse result = caseOpeningService.open(ACCOUNT_ID, CASE_ID);
+
+        assertEquals(skinId, result.wonSkin().skinId());
+        verify(caseRarityRoll).select(List.of(bucket));
+        verify(dropSelector, never()).selectWeighted(any());
+        verify(inventoryService).addItem(ACCOUNT_ID, skinId, InventoryService.SOURCE_CASE_OPENING, openingId);
     }
 }

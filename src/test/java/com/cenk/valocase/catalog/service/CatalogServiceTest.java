@@ -19,14 +19,18 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.cenk.valocase.account.domain.Account;
+import com.cenk.valocase.caseopening.service.CaseRarityRoll;
+import com.cenk.valocase.caseopening.service.DropSelector;
 import com.cenk.valocase.catalog.domain.CaseDefinition;
 import com.cenk.valocase.catalog.domain.CaseEntry;
+import com.cenk.valocase.catalog.domain.CaseRarityWeight;
 import com.cenk.valocase.catalog.domain.Skin;
 import com.cenk.valocase.catalog.dto.CaseDetailResponse;
 import com.cenk.valocase.catalog.dto.CaseDropResponse;
 import com.cenk.valocase.catalog.dto.CaseSummaryResponse;
 import com.cenk.valocase.catalog.repository.CaseDefinitionRepository;
 import com.cenk.valocase.catalog.repository.CaseEntryRepository;
+import com.cenk.valocase.catalog.repository.CaseRarityWeightRepository;
 import com.cenk.valocase.catalog.repository.SkinRepository;
 import com.cenk.valocase.progression.service.ProgressionService;
 import com.cenk.valocase.wallet.dto.WalletResponse;
@@ -38,6 +42,7 @@ class CatalogServiceTest {
     @Mock private SkinRepository skinRepository;
     @Mock private CaseDefinitionRepository caseDefinitionRepository;
     @Mock private CaseEntryRepository caseEntryRepository;
+    @Mock private CaseRarityWeightRepository caseRarityWeightRepository;
     @Mock private WalletService walletService;
 
     private CatalogService service;
@@ -48,8 +53,10 @@ class CatalogServiceTest {
 
     @BeforeEach
     void setUp() {
+        CaseRarityRoll caseRarityRoll = new CaseRarityRoll(new DropSelector(), () -> 0.0);
         service = new CatalogService(skinRepository, caseDefinitionRepository,
-                caseEntryRepository, new ProgressionService(), walletService);
+                caseEntryRepository, caseRarityWeightRepository, caseRarityRoll,
+                new ProgressionService(), walletService);
     }
 
     private static CaseDefinition caseDef(String id, int price, boolean active) {
@@ -152,6 +159,61 @@ class CatalogServiceTest {
         assertEquals(0.75, a.dropChance(), 0.0001);
         assertEquals(0.25, b.dropChance(), 0.0001);
         assertEquals(200L, detail.expectedValueVp());
+    }
+
+    private static Skin skinR(String id, String rarity, int vp) {
+        Skin s = new Skin();
+        s.setId(id);
+        s.setDisplayName(id);
+        s.setWeapon("Melee".equals(rarity) ? "Melee" : "Vandal");
+        s.setRarity(rarity);
+        s.setVpValue(vp);
+        s.setActive(true);
+        return s;
+    }
+
+    private static CaseRarityWeight rw(String caseId, String rarity, double weight) {
+        CaseRarityWeight w = new CaseRarityWeight();
+        w.setCaseId(caseId);
+        w.setRarity(rarity);
+        w.setWeight(weight);
+        return w;
+    }
+
+    @Test
+    void caseDetail_dropChanceFollowsRarityFirstWeights_notPoolComposition() {
+        String caseId = "melee_radiant";
+        when(caseDefinitionRepository.findById(caseId)).thenReturn(Optional.of(caseDef(caseId, 2000, true)));
+        when(caseEntryRepository.findByCaseIdOrderBySkinIdAsc(caseId)).thenReturn(List.of(
+                entry(caseId, "sel", 1), entry(caseId, "del", 1),
+                entry(caseId, "m1", 1), entry(caseId, "m2", 1), entry(caseId, "m3", 1)));
+        when(skinRepository.findAllById(any())).thenReturn(List.of(
+                skinR("sel", "Select", 100), skinR("del", "Deluxe", 200),
+                skinR("m1", "Melee", 1000), skinR("m2", "Melee", 1000), skinR("m3", "Melee", 1000)));
+        when(caseRarityWeightRepository.findByCaseId(caseId)).thenReturn(List.of(
+                rw(caseId, "Select", 47), rw(caseId, "Deluxe", 25), rw(caseId, "Melee", 28)));
+
+        CaseDetailResponse detail = service.getCaseDetail(caseId, null);
+
+        double sel = drop(detail, "sel").dropChance();
+        double del = drop(detail, "del").dropChance();
+        double m1 = drop(detail, "m1").dropChance();
+        double meleeTotal = detail.drops().stream()
+                .filter(d -> d.rarity().equals("Melee"))
+                .mapToDouble(CaseDropResponse::dropChance).sum();
+
+        assertEquals(0.47, sel, 1e-6);
+        assertEquals(0.25, del, 1e-6);
+        // Three Melee skins do not inflate Melee rarity odds beyond the authored 28%
+        // (per-skin chances are rounded to 6 dp, so the bucket sum carries that rounding).
+        assertEquals(0.28, meleeTotal, 1e-5);
+        assertEquals(0.28 / 3.0, m1, 1e-6);
+        double allRarityTotal = sel + del + meleeTotal;
+        assertEquals(1.0, allRarityTotal, 1e-5);
+    }
+
+    private static CaseDropResponse drop(CaseDetailResponse detail, String skinId) {
+        return detail.drops().stream().filter(d -> d.skinId().equals(skinId)).findFirst().orElseThrow();
     }
 
     @Test

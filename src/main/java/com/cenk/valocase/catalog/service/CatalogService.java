@@ -11,8 +11,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.cenk.valocase.account.domain.Account;
+import com.cenk.valocase.caseopening.service.CaseRarityRoll;
+import com.cenk.valocase.caseopening.service.CaseRarityRoll.RarityBucket;
 import com.cenk.valocase.catalog.domain.CaseDefinition;
 import com.cenk.valocase.catalog.domain.CaseEntry;
+import com.cenk.valocase.catalog.domain.CaseRarityWeight;
 import com.cenk.valocase.catalog.domain.Skin;
 import com.cenk.valocase.catalog.dto.CaseDetailResponse;
 import com.cenk.valocase.catalog.dto.CaseDropResponse;
@@ -20,6 +23,7 @@ import com.cenk.valocase.catalog.dto.CaseSummaryResponse;
 import com.cenk.valocase.catalog.dto.SkinResponse;
 import com.cenk.valocase.catalog.repository.CaseDefinitionRepository;
 import com.cenk.valocase.catalog.repository.CaseEntryRepository;
+import com.cenk.valocase.catalog.repository.CaseRarityWeightRepository;
 import com.cenk.valocase.catalog.repository.SkinRepository;
 import com.cenk.valocase.common.exception.ApiException;
 import com.cenk.valocase.progression.domain.CaseCategory;
@@ -45,6 +49,8 @@ public class CatalogService {
     private final SkinRepository skinRepository;
     private final CaseDefinitionRepository caseDefinitionRepository;
     private final CaseEntryRepository caseEntryRepository;
+    private final CaseRarityWeightRepository caseRarityWeightRepository;
+    private final CaseRarityRoll caseRarityRoll;
     private final ProgressionService progressionService;
     private final WalletService walletService;
 
@@ -74,11 +80,25 @@ public class CatalogService {
         List<CaseEntry> eligible = entries.stream()
                 .filter(entry -> rollable(skinsById.get(entry.getSkinId()), entry))
                 .toList();
-        long totalWeight = eligible.stream().mapToLong(CaseEntry::getWeight).sum();
 
-        List<CaseDropResponse> drops = eligible.stream()
-                .map(entry -> toDropResponse(entry, skinsById.get(entry.getSkinId()), totalWeight))
-                .toList();
+        List<CaseRarityWeight> rarityWeights = caseRarityWeightRepository.findByCaseId(caseId);
+        List<RarityBucket> buckets = caseRarityRoll.activeBuckets(eligible, skinsById, rarityWeights);
+
+        List<CaseDropResponse> drops;
+        if (buckets.isEmpty()) {
+            long totalWeight = eligible.stream().mapToLong(CaseEntry::getWeight).sum();
+            drops = eligible.stream()
+                    .map(entry -> toDropResponse(entry, skinsById.get(entry.getSkinId()),
+                            flatDropChance(entry, totalWeight)))
+                    .toList();
+        } else {
+            Map<String, Double> chances = caseRarityRoll.skinDropChances(buckets);
+            drops = buckets.stream()
+                    .flatMap(bucket -> bucket.entries().stream())
+                    .map(entry -> toDropResponse(entry, skinsById.get(entry.getSkinId()),
+                            chances.getOrDefault(entry.getSkinId(), 0.0)))
+                    .toList();
+        }
         long expectedValueVp = (long) Math.floor(drops.stream()
                 .mapToDouble(drop -> drop.dropChance() * drop.vpValue())
                 .sum());
@@ -145,10 +165,13 @@ public class CatalogService {
                 view.canOpen(), view.lockedReason(), view.currentLevel(), view.affordable());
     }
 
-    private static CaseDropResponse toDropResponse(CaseEntry entry, Skin skin, long totalWeight) {
-        double dropChance = totalWeight > 0
+    private static double flatDropChance(CaseEntry entry, long totalWeight) {
+        return totalWeight > 0
                 ? Math.round((double) entry.getWeight() / totalWeight * 1_000_000.0) / 1_000_000.0
                 : 0.0;
+    }
+
+    private static CaseDropResponse toDropResponse(CaseEntry entry, Skin skin, double dropChance) {
         return new CaseDropResponse(
                 skin.getId(),
                 entry.getWeight(),
