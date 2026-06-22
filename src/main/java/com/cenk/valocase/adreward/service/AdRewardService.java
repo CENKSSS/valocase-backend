@@ -30,6 +30,7 @@ import com.cenk.valocase.earnvp.repository.EarnVpSessionRepository;
 import com.cenk.valocase.inventory.domain.InventoryItem;
 import com.cenk.valocase.inventory.repository.InventoryItemRepository;
 import com.cenk.valocase.upgrade.service.UpgradeContextKey;
+import com.cenk.valocase.wallet.service.WalletService;
 
 import lombok.RequiredArgsConstructor;
 
@@ -50,6 +51,7 @@ public class AdRewardService {
     public static final String CODE_EARN_VP_2X_ACTIVE = "EARN_VP_2X_ALREADY_ACTIVE";
     public static final String CODE_UPGRADE_CONTEXT_USED = "UPGRADE_PLUS_5_ALREADY_USED_FOR_CONTEXT";
     public static final String CODE_NO_EARN_SESSION = "EARN_VP_NO_ACTIVE_SESSION";
+    public static final String REASON_MARKET_VP = "AD_REWARD_MARKET_VP";
 
     static final int MAX_AD_TOKEN_LENGTH = 100;
     static final long UNLIMITED_REMAINING_TODAY = 999_999L;
@@ -60,6 +62,7 @@ public class AdRewardService {
     private final InventoryItemRepository inventoryItemRepository;
     private final SkinRepository skinRepository;
     private final AdRewardPolicy policy;
+    private final WalletService walletService;
     private final Clock clock;
 
     @Transactional(readOnly = true)
@@ -67,7 +70,8 @@ public class AdRewardService {
                                             List<String> inputItemIds, List<String> targetSkinIds) {
         return new AdRewardStatusResponse(List.of(
                 earnVp2xStatus(accountId, earnSessionId),
-                upgradePlus5Status(accountId, inputItemIds, targetSkinIds)));
+                upgradePlus5Status(accountId, inputItemIds, targetSkinIds),
+                marketVpStatus()));
     }
 
     @Transactional
@@ -83,6 +87,7 @@ public class AdRewardService {
         return switch (type) {
             case EARN_VP_2X -> activateEarnVp2x(accountId, adToken, request.earnSessionId());
             case UPGRADE_PLUS_5 -> claimUpgradeBuff(accountId, adToken, request);
+            case MARKET_VP_2500 -> grantMarketVp(accountId, adToken);
         };
     }
 
@@ -95,7 +100,7 @@ public class AdRewardService {
             earnVpSessionRepository.save(session);
         }
         return new AdRewardClaimResponse(
-                AdRewardType.EARN_VP_2X.name(), "CLEARED", false, false, true, null, 0L);
+                AdRewardType.EARN_VP_2X.name(), "CLEARED", false, false, true, null, 0L, 0L, 0L);
     }
 
     /** Buff the matching upgrade context would add, without consuming it. Used by preview. */
@@ -160,7 +165,7 @@ public class AdRewardService {
         }
 
         return new AdRewardClaimResponse(AdRewardType.EARN_VP_2X.name(), "OK",
-                true, false, false, CODE_EARN_VP_2X_ACTIVE, remainingSeconds(session, now));
+                true, false, false, CODE_EARN_VP_2X_ACTIVE, remainingSeconds(session, now), 0L, 0L);
     }
 
     private AdRewardClaimResponse claimUpgradeBuff(UUID accountId, String adToken, AdRewardClaimRequest request) {
@@ -183,20 +188,56 @@ public class AdRewardService {
             adRewardClaimRepository.saveAndFlush(claim);
         } catch (DataIntegrityViolationException e) {
             return new AdRewardClaimResponse(AdRewardType.UPGRADE_PLUS_5.name(), "DUPLICATE",
-                    false, true, false, CODE_UPGRADE_CONTEXT_USED, 0L);
+                    false, true, false, CODE_UPGRADE_CONTEXT_USED, 0L, 0L, 0L);
         }
 
         return new AdRewardClaimResponse(AdRewardType.UPGRADE_PLUS_5.name(), "OK",
-                false, true, false, CODE_UPGRADE_CONTEXT_USED, 0L);
+                false, true, false, CODE_UPGRADE_CONTEXT_USED, 0L, 0L, 0L);
+    }
+
+    private AdRewardClaimResponse grantMarketVp(UUID accountId, String adToken) {
+        long reward = policy.marketVpReward();
+        Instant now = Instant.now(clock);
+
+        AdRewardClaim claim = new AdRewardClaim();
+        claim.setAccountId(accountId);
+        claim.setRewardType(AdRewardType.MARKET_VP_2500);
+        claim.setAdToken(adToken);
+        claim.setGrantedVp(reward);
+        claim.setConsumed(true);
+        claim.setCreatedAt(now);
+        claim.setConsumedAt(now);
+        try {
+            adRewardClaimRepository.saveAndFlush(claim);
+        } catch (DataIntegrityViolationException e) {
+            return marketDuplicate(accountId, adToken);
+        }
+
+        long newBalance = walletService.credit(accountId, reward, REASON_MARKET_VP, claim.getId()).getVpBalance();
+        return new AdRewardClaimResponse(AdRewardType.MARKET_VP_2500.name(), "OK",
+                false, false, true, null, 0L, reward, newBalance);
+    }
+
+    private AdRewardClaimResponse marketDuplicate(UUID accountId, String adToken) {
+        long granted = adRewardClaimRepository
+                .findByAccountIdAndRewardTypeAndAdToken(accountId, AdRewardType.MARKET_VP_2500, adToken)
+                .map(c -> c.getGrantedVp() != null ? c.getGrantedVp() : 0L)
+                .orElse(0L);
+        long balance = walletService.getWalletForAccount(accountId).vpBalance();
+        return new AdRewardClaimResponse(AdRewardType.MARKET_VP_2500.name(), "DUPLICATE",
+                false, false, true, null, 0L, granted, balance);
     }
 
     private AdRewardClaimResponse duplicateResponse(UUID accountId, AdRewardType type, AdRewardClaimRequest request) {
+        if (type == AdRewardType.MARKET_VP_2500) {
+            return marketDuplicate(accountId, normalizeAdToken(request.adToken()));
+        }
         if (type == AdRewardType.EARN_VP_2X) {
             EarnVpSession session = requireEarnSession(accountId, request.earnSessionId());
             Instant now = Instant.now(clock);
             boolean active = isBonus2xActive(session, now);
             return new AdRewardClaimResponse(type.name(), "DUPLICATE", active, false,
-                    !active, active ? CODE_EARN_VP_2X_ACTIVE : null, remainingSeconds(session, now));
+                    !active, active ? CODE_EARN_VP_2X_ACTIVE : null, remainingSeconds(session, now), 0L, 0L);
         }
         String contextKey = tryComputeUpgradeContextKey(request.inputItemIds(), mergeTargetSkinIdsLenient(request));
         boolean used = contextKey != null && adRewardClaimRepository
@@ -205,14 +246,14 @@ public class AdRewardService {
                 .findByAccountIdAndRewardTypeAndSourceRefAndConsumedFalse(
                         accountId, AdRewardType.UPGRADE_PLUS_5, contextKey).isPresent();
         return new AdRewardClaimResponse(type.name(), "DUPLICATE", false, active,
-                !used, used ? CODE_UPGRADE_CONTEXT_USED : null, 0L);
+                !used, used ? CODE_UPGRADE_CONTEXT_USED : null, 0L, 0L, 0L);
     }
 
     private AdRewardClaimResponse duplicateEarnVp2x(EarnVpSession session) {
         Instant now = Instant.now(clock);
         boolean active = isBonus2xActive(session, now);
         return new AdRewardClaimResponse(AdRewardType.EARN_VP_2X.name(), "DUPLICATE", active, false,
-                !active, active ? CODE_EARN_VP_2X_ACTIVE : null, remainingSeconds(session, now));
+                !active, active ? CODE_EARN_VP_2X_ACTIVE : null, remainingSeconds(session, now), 0L, 0L);
     }
 
     private AdRewardPlacementStatus earnVp2xStatus(UUID accountId, String earnSessionId) {
@@ -249,6 +290,11 @@ public class AdRewardService {
         return new AdRewardPlacementStatus(AdRewardType.UPGRADE_PLUS_5.name(), !used,
                 UNLIMITED_REMAINING_TODAY, used ? CODE_UPGRADE_CONTEXT_USED : null,
                 false, active, used, 0L, 0L);
+    }
+
+    private AdRewardPlacementStatus marketVpStatus() {
+        return new AdRewardPlacementStatus(AdRewardType.MARKET_VP_2500.name(), true,
+                UNLIMITED_REMAINING_TODAY, null, false, false, false, 0L, 0L);
     }
 
     private EarnVpSession requireEarnSessionForUpdate(UUID accountId, String rawSessionId) {

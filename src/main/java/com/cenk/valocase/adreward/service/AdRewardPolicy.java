@@ -11,6 +11,7 @@ public class AdRewardPolicy {
 
     static final double UPGRADE_BUFF_PERCENT = 5.0;
     static final long EARN_VP_MULTIPLIER = 2L;
+    static final long MARKET_VP_REWARD = 2500L;
 
     public double upgradeBuffPercent() {
         return UPGRADE_BUFF_PERCENT;
@@ -18,5 +19,9 @@ public class AdRewardPolicy {
 
     public long earnVpMultiplier() {
         return EARN_VP_MULTIPLIER;
+    }
+
+    public long marketVpReward() {
+        return MARKET_VP_REWARD;
     }
 }

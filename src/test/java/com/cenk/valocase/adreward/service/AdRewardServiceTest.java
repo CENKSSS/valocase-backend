@@ -6,7 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -37,6 +39,9 @@ import com.cenk.valocase.common.exception.ApiException;
 import com.cenk.valocase.earnvp.domain.EarnVpSession;
 import com.cenk.valocase.earnvp.repository.EarnVpSessionRepository;
 import com.cenk.valocase.inventory.repository.InventoryItemRepository;
+import com.cenk.valocase.wallet.domain.Wallet;
+import com.cenk.valocase.wallet.dto.WalletResponse;
+import com.cenk.valocase.wallet.service.WalletService;
 
 @ExtendWith(MockitoExtension.class)
 class AdRewardServiceTest {
@@ -45,6 +50,7 @@ class AdRewardServiceTest {
     @Mock private EarnVpSessionRepository earnVpSessionRepository;
     @Mock private InventoryItemRepository inventoryItemRepository;
     @Mock private SkinRepository skinRepository;
+    @Mock private WalletService walletService;
 
     private static final Instant NOW = Instant.parse("2026-06-21T00:00:00Z");
     private static final UUID ACCOUNT = UUID.randomUUID();
@@ -57,7 +63,7 @@ class AdRewardServiceTest {
     void setUp() {
         service = new AdRewardService(adRewardClaimRepository, earnVpSessionRepository,
                 inventoryItemRepository, skinRepository, new AdRewardPolicy(),
-                Clock.fixed(NOW, ZoneOffset.UTC));
+                walletService, Clock.fixed(NOW, ZoneOffset.UTC));
     }
 
     @Test
@@ -163,6 +169,51 @@ class AdRewardServiceTest {
         assertEquals(AdRewardService.UNLIMITED_REMAINING_TODAY, upgradeStatus.remainingToday());
         assertNull(upgradeStatus.unavailableReason());
         assertFalse(upgradeStatus.upgradePlus5Active());
+    }
+
+    @Test
+    void marketClaim_grants2500Vp_andReturnsNewBalance() {
+        when(adRewardClaimRepository.findByAccountIdAndRewardTypeAndAdToken(
+                ACCOUNT, AdRewardType.MARKET_VP_2500, "ad-m1")).thenReturn(Optional.empty());
+        Wallet wallet = new Wallet();
+        wallet.setVpBalance(12500L);
+        when(walletService.credit(eq(ACCOUNT), eq(2500L), eq(AdRewardService.REASON_MARKET_VP), any()))
+                .thenReturn(wallet);
+
+        AdRewardClaimResponse response = service.claim(ACCOUNT, AdRewardType.MARKET_VP_2500,
+                new AdRewardClaimRequest("MARKET_VP_2500", "ad-m1", null, null, null, null));
+
+        assertEquals("OK", response.status());
+        assertEquals(2500L, response.grantedVp());
+        assertEquals(12500L, response.newVpBalance());
+        ArgumentCaptor<AdRewardClaim> captor = ArgumentCaptor.forClass(AdRewardClaim.class);
+        verify(adRewardClaimRepository).saveAndFlush(captor.capture());
+        assertEquals(AdRewardType.MARKET_VP_2500, captor.getValue().getRewardType());
+        assertEquals(2500L, captor.getValue().getGrantedVp());
+        assertTrue(captor.getValue().isConsumed());
+        verify(walletService).credit(eq(ACCOUNT), eq(2500L), eq(AdRewardService.REASON_MARKET_VP), any());
+    }
+
+    @Test
+    void marketClaim_duplicateToken_doesNotCreditAgain() {
+        AdRewardClaim prior = new AdRewardClaim();
+        prior.setAccountId(ACCOUNT);
+        prior.setRewardType(AdRewardType.MARKET_VP_2500);
+        prior.setAdToken("ad-m1");
+        prior.setGrantedVp(2500L);
+        when(adRewardClaimRepository.findByAccountIdAndRewardTypeAndAdToken(
+                ACCOUNT, AdRewardType.MARKET_VP_2500, "ad-m1")).thenReturn(Optional.of(prior));
+        when(walletService.getWalletForAccount(ACCOUNT))
+                .thenReturn(new WalletResponse(ACCOUNT.toString(), 12500L, NOW, null));
+
+        AdRewardClaimResponse response = service.claim(ACCOUNT, AdRewardType.MARKET_VP_2500,
+                new AdRewardClaimRequest("MARKET_VP_2500", "ad-m1", null, null, null, null));
+
+        assertEquals("DUPLICATE", response.status());
+        assertEquals(2500L, response.grantedVp());
+        assertEquals(12500L, response.newVpBalance());
+        verify(walletService, never()).credit(any(), anyLong(), any(), any());
+        verify(adRewardClaimRepository, never()).saveAndFlush(any());
     }
 
     private EarnVpSession session(Instant bonusExpiresAt) {
