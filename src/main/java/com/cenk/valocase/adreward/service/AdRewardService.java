@@ -52,6 +52,7 @@ public class AdRewardService {
     public static final String CODE_NO_EARN_SESSION = "EARN_VP_NO_ACTIVE_SESSION";
 
     static final int MAX_AD_TOKEN_LENGTH = 100;
+    static final long UNLIMITED_REMAINING_TODAY = 999_999L;
     static final Duration EARN_VP_2X_WINDOW = Duration.ofMinutes(3);
 
     private final AdRewardClaimRepository adRewardClaimRepository;
@@ -215,6 +216,10 @@ public class AdRewardService {
     }
 
     private AdRewardPlacementStatus earnVp2xStatus(UUID accountId, String earnSessionId) {
+        if (earnSessionId == null || earnSessionId.isBlank()) {
+            return new AdRewardPlacementStatus(AdRewardType.EARN_VP_2X.name(), false,
+                    UNLIMITED_REMAINING_TODAY, CODE_NO_EARN_SESSION, false, false, false, 0L, 0L);
+        }
         EarnVpSession session = requireEarnSession(accountId, earnSessionId);
         Instant now = Instant.now(clock);
         EarnVpSession statusSession = earnVpSessionRepository
@@ -222,7 +227,7 @@ public class AdRewardService {
                 .orElse(session);
         boolean active = isBonus2xActive(statusSession, now);
         return new AdRewardPlacementStatus(AdRewardType.EARN_VP_2X.name(), !active,
-                active ? CODE_EARN_VP_2X_ACTIVE : null, active, false, false, 0L,
+                UNLIMITED_REMAINING_TODAY, active ? CODE_EARN_VP_2X_ACTIVE : null, active, false, false, 0L,
                 remainingSeconds(statusSession, now));
     }
 
@@ -232,7 +237,8 @@ public class AdRewardService {
         if (contextKey == null) {
             boolean anyActive = adRewardClaimRepository
                     .existsByAccountIdAndRewardTypeAndConsumedFalse(accountId, AdRewardType.UPGRADE_PLUS_5);
-            return new AdRewardPlacementStatus(AdRewardType.UPGRADE_PLUS_5.name(), true, null,
+            return new AdRewardPlacementStatus(AdRewardType.UPGRADE_PLUS_5.name(), true,
+                    UNLIMITED_REMAINING_TODAY, null,
                     false, anyActive, false, 0L, 0L);
         }
         boolean active = adRewardClaimRepository
@@ -241,7 +247,8 @@ public class AdRewardService {
         boolean used = adRewardClaimRepository
                 .existsByAccountIdAndRewardTypeAndSourceRef(accountId, AdRewardType.UPGRADE_PLUS_5, contextKey);
         return new AdRewardPlacementStatus(AdRewardType.UPGRADE_PLUS_5.name(), !used,
-                used ? CODE_UPGRADE_CONTEXT_USED : null, false, active, used, 0L, 0L);
+                UNLIMITED_REMAINING_TODAY, used ? CODE_UPGRADE_CONTEXT_USED : null,
+                false, active, used, 0L, 0L);
     }
 
     private EarnVpSession requireEarnSessionForUpdate(UUID accountId, String rawSessionId) {

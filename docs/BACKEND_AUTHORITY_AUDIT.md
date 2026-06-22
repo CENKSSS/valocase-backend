@@ -865,7 +865,7 @@ Suggested response shape:
 {
   "adSessionId": "uuid",
   "provider": "ad-network",
-  "rewardType": "UPGRADE_BOOST",
+  "rewardType": "UPGRADE_PLUS_5",
   "boostPercent": 5,
   "serverExpiresAt": "2026-06-21T12:10:00Z",
   "verified": false

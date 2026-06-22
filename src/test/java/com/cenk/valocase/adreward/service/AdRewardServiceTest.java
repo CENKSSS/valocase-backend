@@ -124,6 +124,7 @@ class AdRewardServiceTest {
 
         assertTrue(earnStatus.earnVp2xActive());
         assertFalse(earnStatus.isAvailable());
+        assertEquals(AdRewardService.UNLIMITED_REMAINING_TODAY, earnStatus.remainingToday());
         assertEquals(75L, earnStatus.earnVp2xRemainingSeconds());
     }
 
@@ -140,7 +141,28 @@ class AdRewardServiceTest {
 
         assertFalse(earnStatus.earnVp2xActive());
         assertTrue(earnStatus.isAvailable());
+        assertEquals(AdRewardService.UNLIMITED_REMAINING_TODAY, earnStatus.remainingToday());
         assertEquals(0L, earnStatus.earnVp2xRemainingSeconds());
+    }
+
+    @Test
+    void status_missingEarnSessionId_returnsEarnUnavailableAndUpgradeNormally() {
+        when(adRewardClaimRepository.existsByAccountIdAndRewardTypeAndConsumedFalse(
+                ACCOUNT, AdRewardType.UPGRADE_PLUS_5)).thenReturn(false);
+
+        AdRewardStatusResponse response = service.getStatus(ACCOUNT, null, List.of(), List.of());
+        AdRewardPlacementStatus earnStatus = response.placements().get(0);
+        AdRewardPlacementStatus upgradeStatus = response.placements().get(1);
+
+        assertFalse(earnStatus.isAvailable());
+        assertEquals(AdRewardService.CODE_NO_EARN_SESSION, earnStatus.unavailableReason());
+        assertEquals(AdRewardService.UNLIMITED_REMAINING_TODAY, earnStatus.remainingToday());
+        assertFalse(earnStatus.earnVp2xActive());
+        assertEquals(0L, earnStatus.earnVp2xRemainingSeconds());
+        assertTrue(upgradeStatus.isAvailable());
+        assertEquals(AdRewardService.UNLIMITED_REMAINING_TODAY, upgradeStatus.remainingToday());
+        assertNull(upgradeStatus.unavailableReason());
+        assertFalse(upgradeStatus.upgradePlus5Active());
     }
 
     private EarnVpSession session(Instant bonusExpiresAt) {

@@ -10,6 +10,7 @@ package com.cenk.valocase.adreward.dto;
 public record AdRewardPlacementStatus(
         String rewardType,
         boolean isAvailable,
+        long remainingToday,
         String unavailableReason,
         boolean earnVp2xActive,
         boolean upgradePlus5Active,
