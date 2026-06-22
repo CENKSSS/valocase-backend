@@ -47,6 +47,7 @@ public class EarnVpService {
     static final BigDecimal MULTIPLIER_START = BigDecimal.ONE;
     static final BigDecimal MULTIPLIER_STEP = new BigDecimal("0.02");
     static final BigDecimal MULTIPLIER_MAX = new BigDecimal("3.0");
+    static final BigDecimal BONUS_2X_MULTIPLIER = new BigDecimal("2");
 
     private static final BigDecimal MILLIS_PER_SECOND = new BigDecimal("1000");
     private static final BigDecimal DECAY_SLOW = new BigDecimal("0.05");
@@ -99,18 +100,20 @@ public class EarnVpService {
         List<Long> offsets = sanitizeOffsets(tapOffsetsMs, serverDurationMs);
 
         int acceptedTapCount;
-        long vpGranted;
+        BigDecimal sessionReward;
         if (offsets.isEmpty()) {
             acceptedTapCount = cappedTaps;
-            vpGranted = computeReward(acceptedTapCount);
+            sessionReward = computeReward(acceptedTapCount);
         } else {
             acceptedTapCount = Math.min(cappedTaps, offsets.size());
-            vpGranted = computeTimedReward(offsets.subList(0, acceptedTapCount));
+            sessionReward = computeTimedReward(offsets.subList(0, acceptedTapCount));
         }
 
         if (isBonus2xActive(session, Instant.now(clock))) {
-            vpGranted *= 2L;
+            sessionReward = sessionReward.multiply(BONUS_2X_MULTIPLIER);
         }
+
+        long vpGranted = sessionReward.setScale(0, RoundingMode.FLOOR).longValueExact();
 
         EarnVpClaim claim = new EarnVpClaim();
         claim.setAccountId(accountId);
@@ -133,17 +136,17 @@ public class EarnVpService {
     }
 
     // Aggregate fallback: continuous taps, no idle-decay (no per-tap timing available).
-    private long computeReward(int acceptedTapCount) {
+    private BigDecimal computeReward(int acceptedTapCount) {
         BigDecimal total = BigDecimal.ZERO;
         BigDecimal multiplier = MULTIPLIER_START;
         for (int tap = 0; tap < acceptedTapCount; tap++) {
             total = total.add(BASE_REWARD.multiply(multiplier));
             multiplier = multiplier.add(MULTIPLIER_STEP).min(MULTIPLIER_MAX);
         }
-        return total.setScale(0, RoundingMode.FLOOR).longValueExact();
+        return total;
     }
 
-    private long computeTimedReward(List<Long> sortedOffsetsMs) {
+    private BigDecimal computeTimedReward(List<Long> sortedOffsetsMs) {
         BigDecimal total = BigDecimal.ZERO;
         BigDecimal multiplier = MULTIPLIER_START;
         Long previousOffset = null;
@@ -155,7 +158,7 @@ public class EarnVpService {
             multiplier = multiplier.add(MULTIPLIER_STEP).min(MULTIPLIER_MAX);
             previousOffset = offset;
         }
-        return total.setScale(0, RoundingMode.FLOOR).longValueExact();
+        return total;
     }
 
     private BigDecimal applyDecay(BigDecimal multiplier, long idleMs) {
