@@ -52,10 +52,13 @@ public class AdRewardService {
     public static final String CODE_UPGRADE_CONTEXT_USED = "UPGRADE_PLUS_5_ALREADY_USED_FOR_CONTEXT";
     public static final String CODE_NO_EARN_SESSION = "EARN_VP_NO_ACTIVE_SESSION";
     public static final String REASON_MARKET_VP = "AD_REWARD_MARKET_VP";
+    public static final String CODE_MARKET_COOLDOWN = "MARKET_VP_COOLDOWN_ACTIVE";
 
     static final int MAX_AD_TOKEN_LENGTH = 100;
     static final long UNLIMITED_REMAINING_TODAY = 999_999L;
     static final Duration EARN_VP_2X_WINDOW = Duration.ofMinutes(3);
+    static final long MARKET_CLAIMS_PER_CYCLE = 4L;
+    static final Duration MARKET_COOLDOWN = Duration.ofMinutes(15);
 
     private final AdRewardClaimRepository adRewardClaimRepository;
     private final EarnVpSessionRepository earnVpSessionRepository;
@@ -71,7 +74,7 @@ public class AdRewardService {
         return new AdRewardStatusResponse(List.of(
                 earnVp2xStatus(accountId, earnSessionId),
                 upgradePlus5Status(accountId, inputItemIds, targetSkinIds),
-                marketVpStatus()));
+                marketVpStatus(accountId)));
     }
 
     @Transactional
@@ -100,7 +103,7 @@ public class AdRewardService {
             earnVpSessionRepository.save(session);
         }
         return new AdRewardClaimResponse(
-                AdRewardType.EARN_VP_2X.name(), "CLEARED", false, false, true, null, 0L, 0L, 0L);
+                AdRewardType.EARN_VP_2X.name(), "CLEARED", false, false, true, null, 0L, 0L, 0L, 0L, false, 0L);
     }
 
     /** Buff the matching upgrade context would add, without consuming it. Used by preview. */
@@ -165,7 +168,7 @@ public class AdRewardService {
         }
 
         return new AdRewardClaimResponse(AdRewardType.EARN_VP_2X.name(), "OK",
-                true, false, false, CODE_EARN_VP_2X_ACTIVE, remainingSeconds(session, now), 0L, 0L);
+                true, false, false, CODE_EARN_VP_2X_ACTIVE, remainingSeconds(session, now), 0L, 0L, 0L, false, 0L);
     }
 
     private AdRewardClaimResponse claimUpgradeBuff(UUID accountId, String adToken, AdRewardClaimRequest request) {
@@ -188,17 +191,26 @@ public class AdRewardService {
             adRewardClaimRepository.saveAndFlush(claim);
         } catch (DataIntegrityViolationException e) {
             return new AdRewardClaimResponse(AdRewardType.UPGRADE_PLUS_5.name(), "DUPLICATE",
-                    false, true, false, CODE_UPGRADE_CONTEXT_USED, 0L, 0L, 0L);
+                    false, true, false, CODE_UPGRADE_CONTEXT_USED, 0L, 0L, 0L, 0L, false, 0L);
         }
 
         return new AdRewardClaimResponse(AdRewardType.UPGRADE_PLUS_5.name(), "OK",
-                false, true, false, CODE_UPGRADE_CONTEXT_USED, 0L, 0L, 0L);
+                false, true, false, CODE_UPGRADE_CONTEXT_USED, 0L, 0L, 0L, 0L, false, 0L);
     }
 
     private AdRewardClaimResponse grantMarketVp(UUID accountId, String adToken) {
-        long reward = policy.marketVpReward();
         Instant now = Instant.now(clock);
+        long priorCount = adRewardClaimRepository
+                .countByAccountIdAndRewardType(accountId, AdRewardType.MARKET_VP_2500);
 
+        long cooldownSecs = marketCooldownRemainingSeconds(accountId, priorCount, now);
+        if (cooldownSecs > 0L) {
+            long balance = walletService.getWalletForAccount(accountId).vpBalance();
+            return new AdRewardClaimResponse(AdRewardType.MARKET_VP_2500.name(), "COOLDOWN",
+                    false, false, false, CODE_MARKET_COOLDOWN, 0L, 0L, balance, 0L, true, cooldownSecs);
+        }
+
+        long reward = policy.marketVpReward();
         AdRewardClaim claim = new AdRewardClaim();
         claim.setAccountId(accountId);
         claim.setRewardType(AdRewardType.MARKET_VP_2500);
@@ -214,8 +226,14 @@ public class AdRewardService {
         }
 
         long newBalance = walletService.credit(accountId, reward, REASON_MARKET_VP, claim.getId()).getVpBalance();
+
+        long newCount = priorCount + 1L;
+        boolean cooldownNow = newCount % MARKET_CLAIMS_PER_CYCLE == 0L;
+        long remaining = cooldownNow ? 0L : MARKET_CLAIMS_PER_CYCLE - (newCount % MARKET_CLAIMS_PER_CYCLE);
+        long remainingCooldownSecs = cooldownNow ? MARKET_COOLDOWN.toSeconds() : 0L;
         return new AdRewardClaimResponse(AdRewardType.MARKET_VP_2500.name(), "OK",
-                false, false, true, null, 0L, reward, newBalance);
+                false, false, !cooldownNow, cooldownNow ? CODE_MARKET_COOLDOWN : null, 0L,
+                reward, newBalance, remaining, cooldownNow, remainingCooldownSecs);
     }
 
     private AdRewardClaimResponse marketDuplicate(UUID accountId, String adToken) {
@@ -224,8 +242,33 @@ public class AdRewardService {
                 .map(c -> c.getGrantedVp() != null ? c.getGrantedVp() : 0L)
                 .orElse(0L);
         long balance = walletService.getWalletForAccount(accountId).vpBalance();
+        Instant now = Instant.now(clock);
+        long count = adRewardClaimRepository.countByAccountIdAndRewardType(accountId, AdRewardType.MARKET_VP_2500);
+        long cooldownSecs = marketCooldownRemainingSeconds(accountId, count, now);
+        boolean cooldown = cooldownSecs > 0L;
+        long remaining = cooldown ? 0L : MARKET_CLAIMS_PER_CYCLE - (count % MARKET_CLAIMS_PER_CYCLE);
         return new AdRewardClaimResponse(AdRewardType.MARKET_VP_2500.name(), "DUPLICATE",
-                false, false, true, null, 0L, granted, balance);
+                false, false, !cooldown, cooldown ? CODE_MARKET_COOLDOWN : null, 0L,
+                granted, balance, remaining, cooldown, cooldownSecs);
+    }
+
+    // Cooldown applies only at a full-cycle boundary (count is a multiple of the cycle size).
+    private long marketCooldownRemainingSeconds(UUID accountId, long count, Instant now) {
+        if (count == 0L || count % MARKET_CLAIMS_PER_CYCLE != 0L) {
+            return 0L;
+        }
+        Instant lastClaimAt = adRewardClaimRepository
+                .findFirstByAccountIdAndRewardTypeOrderByCreatedAtDesc(accountId, AdRewardType.MARKET_VP_2500)
+                .map(AdRewardClaim::getCreatedAt)
+                .orElse(null);
+        if (lastClaimAt == null) {
+            return 0L;
+        }
+        Instant expiresAt = lastClaimAt.plus(MARKET_COOLDOWN);
+        if (!now.isBefore(expiresAt)) {
+            return 0L;
+        }
+        return (Duration.between(now, expiresAt).toMillis() + 999L) / 1_000L;
     }
 
     private AdRewardClaimResponse duplicateResponse(UUID accountId, AdRewardType type, AdRewardClaimRequest request) {
@@ -237,7 +280,8 @@ public class AdRewardService {
             Instant now = Instant.now(clock);
             boolean active = isBonus2xActive(session, now);
             return new AdRewardClaimResponse(type.name(), "DUPLICATE", active, false,
-                    !active, active ? CODE_EARN_VP_2X_ACTIVE : null, remainingSeconds(session, now), 0L, 0L);
+                    !active, active ? CODE_EARN_VP_2X_ACTIVE : null, remainingSeconds(session, now),
+                    0L, 0L, 0L, false, 0L);
         }
         String contextKey = tryComputeUpgradeContextKey(request.inputItemIds(), mergeTargetSkinIdsLenient(request));
         boolean used = contextKey != null && adRewardClaimRepository
@@ -246,14 +290,15 @@ public class AdRewardService {
                 .findByAccountIdAndRewardTypeAndSourceRefAndConsumedFalse(
                         accountId, AdRewardType.UPGRADE_PLUS_5, contextKey).isPresent();
         return new AdRewardClaimResponse(type.name(), "DUPLICATE", false, active,
-                !used, used ? CODE_UPGRADE_CONTEXT_USED : null, 0L, 0L, 0L);
+                !used, used ? CODE_UPGRADE_CONTEXT_USED : null, 0L, 0L, 0L, 0L, false, 0L);
     }
 
     private AdRewardClaimResponse duplicateEarnVp2x(EarnVpSession session) {
         Instant now = Instant.now(clock);
         boolean active = isBonus2xActive(session, now);
         return new AdRewardClaimResponse(AdRewardType.EARN_VP_2X.name(), "DUPLICATE", active, false,
-                !active, active ? CODE_EARN_VP_2X_ACTIVE : null, remainingSeconds(session, now), 0L, 0L);
+                !active, active ? CODE_EARN_VP_2X_ACTIVE : null, remainingSeconds(session, now),
+                0L, 0L, 0L, false, 0L);
     }
 
     private AdRewardPlacementStatus earnVp2xStatus(UUID accountId, String earnSessionId) {
@@ -292,9 +337,14 @@ public class AdRewardService {
                 false, active, used, 0L, 0L);
     }
 
-    private AdRewardPlacementStatus marketVpStatus() {
-        return new AdRewardPlacementStatus(AdRewardType.MARKET_VP_2500.name(), true,
-                UNLIMITED_REMAINING_TODAY, null, false, false, false, 0L, 0L);
+    private AdRewardPlacementStatus marketVpStatus(UUID accountId) {
+        Instant now = Instant.now(clock);
+        long count = adRewardClaimRepository.countByAccountIdAndRewardType(accountId, AdRewardType.MARKET_VP_2500);
+        long cooldownSecs = marketCooldownRemainingSeconds(accountId, count, now);
+        boolean cooldown = cooldownSecs > 0L;
+        long remaining = cooldown ? 0L : MARKET_CLAIMS_PER_CYCLE - (count % MARKET_CLAIMS_PER_CYCLE);
+        return new AdRewardPlacementStatus(AdRewardType.MARKET_VP_2500.name(), !cooldown,
+                remaining, cooldown ? CODE_MARKET_COOLDOWN : null, false, false, false, cooldownSecs, 0L);
     }
 
     private EarnVpSession requireEarnSessionForUpdate(UUID accountId, String rawSessionId) {

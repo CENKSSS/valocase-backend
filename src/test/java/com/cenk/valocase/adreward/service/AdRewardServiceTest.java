@@ -172,48 +172,148 @@ class AdRewardServiceTest {
     }
 
     @Test
-    void marketClaim_grants2500Vp_andReturnsNewBalance() {
-        when(adRewardClaimRepository.findByAccountIdAndRewardTypeAndAdToken(
-                ACCOUNT, AdRewardType.MARKET_VP_2500, "ad-m1")).thenReturn(Optional.empty());
-        Wallet wallet = new Wallet();
-        wallet.setVpBalance(12500L);
-        when(walletService.credit(eq(ACCOUNT), eq(2500L), eq(AdRewardService.REASON_MARKET_VP), any()))
-                .thenReturn(wallet);
+    void firstMarketClaim_grants2500_andLeavesThreeRemaining() {
+        when(adRewardClaimRepository.countByAccountIdAndRewardType(ACCOUNT, MARKET)).thenReturn(0L);
+        stubFreshMarketToken("ad-m1");
+        stubMarketCredit(12500L);
 
-        AdRewardClaimResponse response = service.claim(ACCOUNT, AdRewardType.MARKET_VP_2500,
-                new AdRewardClaimRequest("MARKET_VP_2500", "ad-m1", null, null, null, null));
+        AdRewardClaimResponse r = service.claim(ACCOUNT, MARKET, marketReq("ad-m1"));
 
-        assertEquals("OK", response.status());
-        assertEquals(2500L, response.grantedVp());
-        assertEquals(12500L, response.newVpBalance());
+        assertEquals("OK", r.status());
+        assertEquals(2500L, r.grantedVp());
+        assertEquals(12500L, r.newVpBalance());
+        assertEquals(3L, r.marketRemainingClaims());
+        assertFalse(r.marketCooldownActive());
+        assertEquals(0L, r.marketCooldownRemainingSeconds());
         ArgumentCaptor<AdRewardClaim> captor = ArgumentCaptor.forClass(AdRewardClaim.class);
         verify(adRewardClaimRepository).saveAndFlush(captor.capture());
-        assertEquals(AdRewardType.MARKET_VP_2500, captor.getValue().getRewardType());
         assertEquals(2500L, captor.getValue().getGrantedVp());
         assertTrue(captor.getValue().isConsumed());
         verify(walletService).credit(eq(ACCOUNT), eq(2500L), eq(AdRewardService.REASON_MARKET_VP), any());
     }
 
     @Test
+    void secondAndThirdMarketClaims_grant2500() {
+        when(adRewardClaimRepository.findByAccountIdAndRewardTypeAndAdToken(eq(ACCOUNT), eq(MARKET), any()))
+                .thenReturn(Optional.empty());
+        when(adRewardClaimRepository.countByAccountIdAndRewardType(ACCOUNT, MARKET)).thenReturn(1L, 2L);
+        stubMarketCredit(15000L);
+
+        AdRewardClaimResponse second = service.claim(ACCOUNT, MARKET, marketReq("ad-m2"));
+        assertEquals("OK", second.status());
+        assertEquals(2500L, second.grantedVp());
+        assertEquals(2L, second.marketRemainingClaims());
+        assertFalse(second.marketCooldownActive());
+
+        AdRewardClaimResponse third = service.claim(ACCOUNT, MARKET, marketReq("ad-m3"));
+        assertEquals("OK", third.status());
+        assertEquals(2500L, third.grantedVp());
+        assertEquals(1L, third.marketRemainingClaims());
+        assertFalse(third.marketCooldownActive());
+    }
+
+    @Test
+    void fourthMarketClaim_grants2500_andStartsCooldown() {
+        when(adRewardClaimRepository.countByAccountIdAndRewardType(ACCOUNT, MARKET)).thenReturn(3L);
+        stubFreshMarketToken("ad-m4");
+        stubMarketCredit(20000L);
+
+        AdRewardClaimResponse r = service.claim(ACCOUNT, MARKET, marketReq("ad-m4"));
+
+        assertEquals("OK", r.status());
+        assertEquals(2500L, r.grantedVp());
+        assertEquals(20000L, r.newVpBalance());
+        assertEquals(0L, r.marketRemainingClaims());
+        assertTrue(r.marketCooldownActive());
+        assertEquals(900L, r.marketCooldownRemainingSeconds());
+        assertFalse(r.isAvailable());
+        verify(walletService).credit(eq(ACCOUNT), eq(2500L), eq(AdRewardService.REASON_MARKET_VP), any());
+    }
+
+    @Test
+    void marketClaim_duringCooldown_rejectedWithZeroVp() {
+        stubFreshMarketToken("ad-m5");
+        when(adRewardClaimRepository.countByAccountIdAndRewardType(ACCOUNT, MARKET)).thenReturn(4L);
+        when(adRewardClaimRepository.findFirstByAccountIdAndRewardTypeOrderByCreatedAtDesc(ACCOUNT, MARKET))
+                .thenReturn(Optional.of(marketClaimAt(NOW.minusSeconds(60))));
+        when(walletService.getWalletForAccount(ACCOUNT))
+                .thenReturn(new WalletResponse(ACCOUNT.toString(), 20000L, NOW, null));
+
+        AdRewardClaimResponse r = service.claim(ACCOUNT, MARKET, marketReq("ad-m5"));
+
+        assertEquals("COOLDOWN", r.status());
+        assertEquals(0L, r.grantedVp());
+        assertEquals(20000L, r.newVpBalance());
+        assertEquals(0L, r.marketRemainingClaims());
+        assertTrue(r.marketCooldownActive());
+        assertEquals(840L, r.marketCooldownRemainingSeconds());
+        assertEquals(AdRewardService.CODE_MARKET_COOLDOWN, r.unavailableReason());
+        verify(walletService, never()).credit(any(), anyLong(), any(), any());
+        verify(adRewardClaimRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void marketClaim_afterCooldownExpires_grantsAgain() {
+        stubFreshMarketToken("ad-m6");
+        when(adRewardClaimRepository.countByAccountIdAndRewardType(ACCOUNT, MARKET)).thenReturn(4L);
+        when(adRewardClaimRepository.findFirstByAccountIdAndRewardTypeOrderByCreatedAtDesc(ACCOUNT, MARKET))
+                .thenReturn(Optional.of(marketClaimAt(NOW.minusSeconds(16 * 60))));
+        stubMarketCredit(22500L);
+
+        AdRewardClaimResponse r = service.claim(ACCOUNT, MARKET, marketReq("ad-m6"));
+
+        assertEquals("OK", r.status());
+        assertEquals(2500L, r.grantedVp());
+        assertEquals(22500L, r.newVpBalance());
+        assertEquals(3L, r.marketRemainingClaims());
+        assertFalse(r.marketCooldownActive());
+        verify(walletService).credit(eq(ACCOUNT), eq(2500L), eq(AdRewardService.REASON_MARKET_VP), any());
+    }
+
+    @Test
     void marketClaim_duplicateToken_doesNotCreditAgain() {
-        AdRewardClaim prior = new AdRewardClaim();
-        prior.setAccountId(ACCOUNT);
-        prior.setRewardType(AdRewardType.MARKET_VP_2500);
+        AdRewardClaim prior = marketClaimAt(NOW);
         prior.setAdToken("ad-m1");
-        prior.setGrantedVp(2500L);
         when(adRewardClaimRepository.findByAccountIdAndRewardTypeAndAdToken(
-                ACCOUNT, AdRewardType.MARKET_VP_2500, "ad-m1")).thenReturn(Optional.of(prior));
+                ACCOUNT, MARKET, "ad-m1")).thenReturn(Optional.of(prior));
+        when(adRewardClaimRepository.countByAccountIdAndRewardType(ACCOUNT, MARKET)).thenReturn(1L);
         when(walletService.getWalletForAccount(ACCOUNT))
                 .thenReturn(new WalletResponse(ACCOUNT.toString(), 12500L, NOW, null));
 
-        AdRewardClaimResponse response = service.claim(ACCOUNT, AdRewardType.MARKET_VP_2500,
-                new AdRewardClaimRequest("MARKET_VP_2500", "ad-m1", null, null, null, null));
+        AdRewardClaimResponse r = service.claim(ACCOUNT, MARKET, marketReq("ad-m1"));
 
-        assertEquals("DUPLICATE", response.status());
-        assertEquals(2500L, response.grantedVp());
-        assertEquals(12500L, response.newVpBalance());
+        assertEquals("DUPLICATE", r.status());
+        assertEquals(2500L, r.grantedVp());
+        assertEquals(12500L, r.newVpBalance());
         verify(walletService, never()).credit(any(), anyLong(), any(), any());
         verify(adRewardClaimRepository, never()).saveAndFlush(any());
+    }
+
+    private static final AdRewardType MARKET = AdRewardType.MARKET_VP_2500;
+
+    private static AdRewardClaimRequest marketReq(String adToken) {
+        return new AdRewardClaimRequest("MARKET_VP_2500", adToken, null, null, null, null);
+    }
+
+    private void stubFreshMarketToken(String adToken) {
+        when(adRewardClaimRepository.findByAccountIdAndRewardTypeAndAdToken(ACCOUNT, MARKET, adToken))
+                .thenReturn(Optional.empty());
+    }
+
+    private void stubMarketCredit(long resultingBalance) {
+        Wallet wallet = new Wallet();
+        wallet.setVpBalance(resultingBalance);
+        when(walletService.credit(eq(ACCOUNT), eq(2500L), eq(AdRewardService.REASON_MARKET_VP), any()))
+                .thenReturn(wallet);
+    }
+
+    private AdRewardClaim marketClaimAt(Instant createdAt) {
+        AdRewardClaim claim = new AdRewardClaim();
+        claim.setAccountId(ACCOUNT);
+        claim.setRewardType(MARKET);
+        claim.setGrantedVp(2500L);
+        claim.setCreatedAt(createdAt);
+        return claim;
     }
 
     private EarnVpSession session(Instant bonusExpiresAt) {

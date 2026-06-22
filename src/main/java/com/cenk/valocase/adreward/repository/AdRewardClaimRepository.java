@@ -19,6 +19,11 @@ public interface AdRewardClaimRepository extends JpaRepository<AdRewardClaim, UU
     Optional<AdRewardClaim> findByAccountIdAndRewardTypeAndAdToken(
             UUID accountId, AdRewardType rewardType, String adToken);
 
+    long countByAccountIdAndRewardType(UUID accountId, AdRewardType rewardType);
+
+    Optional<AdRewardClaim> findFirstByAccountIdAndRewardTypeOrderByCreatedAtDesc(
+            UUID accountId, AdRewardType rewardType);
+
     boolean existsByAccountIdAndRewardTypeAndSourceRef(
             UUID accountId, AdRewardType rewardType, String sourceRef);
 
