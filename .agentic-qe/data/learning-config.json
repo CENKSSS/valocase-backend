@@ -1,0 +1,13 @@
+{
+  "embeddingModel": "auto",
+  "hnswConfig": {
+    "M": 16,
+    "efConstruction": 200,
+    "efSearch": 100
+  },
+  "qualityThreshold": 0.7,
+  "promotionThreshold": 3,
+  "databasePath": "C:\\Users\\cenk_\\Desktop\\valocase-backend\\.agentic-qe\\data\\memory.db",
+  "hnswIndexPath": "C:\\Users\\cenk_\\Desktop\\valocase-backend\\.agentic-qe\\data\\hnsw\\index.bin",
+  "initialized": "2026-06-22T22:21:04.942Z"
+}
