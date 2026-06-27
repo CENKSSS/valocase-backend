@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -45,12 +46,15 @@ import com.cenk.valocase.battle.repository.BattleLobbySlotRepository;
 import com.cenk.valocase.battle.repository.BattleParticipantRepository;
 import com.cenk.valocase.battle.repository.BattleRepository;
 import com.cenk.valocase.battle.repository.BattleRollRepository;
+import com.cenk.valocase.caseopening.service.CaseRarityRoll;
+import com.cenk.valocase.caseopening.service.CaseRarityRoll.RarityBucket;
 import com.cenk.valocase.caseopening.service.DropSelector;
 import com.cenk.valocase.catalog.domain.CaseDefinition;
 import com.cenk.valocase.catalog.domain.CaseEntry;
 import com.cenk.valocase.catalog.domain.Skin;
 import com.cenk.valocase.catalog.repository.CaseDefinitionRepository;
 import com.cenk.valocase.catalog.repository.CaseEntryRepository;
+import com.cenk.valocase.catalog.repository.CaseRarityWeightRepository;
 import com.cenk.valocase.catalog.repository.SkinRepository;
 import com.cenk.valocase.common.exception.ApiException;
 import com.cenk.valocase.inventory.domain.InventoryItem;
@@ -68,9 +72,11 @@ class BattleLobbyServiceTest {
     @Mock private CaseDefinitionRepository caseDefinitionRepository;
     @Mock private CaseEntryRepository caseEntryRepository;
     @Mock private SkinRepository skinRepository;
+    @Mock private CaseRarityWeightRepository caseRarityWeightRepository;
     @Mock private WalletService walletService;
     @Mock private InventoryService inventoryService;
     @Mock private DropSelector dropSelector;
+    @Mock private CaseRarityRoll caseRarityRoll;
     @Mock private BattleResolver battleResolver;
     @Mock private BattleRepository battleRepository;
     @Mock private BattleParticipantRepository battleParticipantRepository;
@@ -347,6 +353,47 @@ class BattleLobbyServiceTest {
         assertEquals(Integer.valueOf(0), res.winnerSlotIndex());
         // 2 slots x 2 rounds = 4 rolled skins, all granted to the connected winner.
         verify(inventoryService, times(4)).addItem(eq(CREATOR), eq("skin_a"), any(), any());
+    }
+
+    @Test
+    void getLobby_resolve_whenBucketsPresent_usesRarityFirst_notFlatPool() {
+        BattleLobby lobby = new BattleLobby();
+        lobby.setId(LOBBY);
+        lobby.setCreatorAccountId(CREATOR);
+        lobby.setCaseId(CASE_ID);
+        lobby.setRounds(2);
+        lobby.setMaxSlots(2);
+        lobby.setEntryCost(200L);
+        lobby.setStatus(LobbyStatus.STARTING);
+        lobby.setCreatedAt(Instant.now().minus(30, ChronoUnit.SECONDS));
+        lobby.setReadyAt(Instant.now().minus(1, ChronoUnit.SECONDS));
+
+        List<BattleLobbySlot> slots = List.of(
+                slot(0, SlotType.REAL, CREATOR, true),
+                slot(1, SlotType.BOT, null, false));
+
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(slots);
+        when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(100)));
+        when(caseEntryRepository.findByCaseIdOrderBySkinIdAsc(CASE_ID)).thenReturn(List.of(entry()));
+        when(skinRepository.findAllById(any())).thenReturn(List.of(skin()));
+        when(caseRarityRoll.activeBuckets(any(), any(), any()))
+                .thenReturn(List.of(new RarityBucket("Select", 70.0, 1.0, List.of(entry()))));
+        when(caseRarityRoll.select(any())).thenReturn(entry());
+        when(battleResolver.winningIndex(any())).thenReturn(1); // bot wins; no grants needed
+        when(battleRepository.saveAndFlush(any(Battle.class))).thenAnswer(inv -> {
+            Battle b = inv.getArgument(0);
+            b.setId(UUID.randomUUID());
+            return b;
+        });
+        when(battleParticipantRepository.findByBattleIdOrderByParticipantIndexAsc(any())).thenReturn(List.of());
+        when(battleRollRepository.findByBattleId(any())).thenReturn(List.of());
+
+        LobbyResponse res = service.getLobby(CREATOR, LOBBY);
+
+        assertEquals(LobbyStatus.COMPLETED.name(), res.status());
+        verify(caseRarityRoll, atLeastOnce()).select(any());
+        verify(dropSelector, never()).selectWeighted(any());
     }
 
     @Test

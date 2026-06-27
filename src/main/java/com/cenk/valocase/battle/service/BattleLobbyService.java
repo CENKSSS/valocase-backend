@@ -38,12 +38,16 @@ import com.cenk.valocase.battle.repository.BattleLobbySlotRepository;
 import com.cenk.valocase.battle.repository.BattleParticipantRepository;
 import com.cenk.valocase.battle.repository.BattleRepository;
 import com.cenk.valocase.battle.repository.BattleRollRepository;
+import com.cenk.valocase.caseopening.service.CaseRarityRoll;
+import com.cenk.valocase.caseopening.service.CaseRarityRoll.RarityBucket;
 import com.cenk.valocase.caseopening.service.DropSelector;
 import com.cenk.valocase.catalog.domain.CaseDefinition;
 import com.cenk.valocase.catalog.domain.CaseEntry;
+import com.cenk.valocase.catalog.domain.CaseRarityWeight;
 import com.cenk.valocase.catalog.domain.Skin;
 import com.cenk.valocase.catalog.repository.CaseDefinitionRepository;
 import com.cenk.valocase.catalog.repository.CaseEntryRepository;
+import com.cenk.valocase.catalog.repository.CaseRarityWeightRepository;
 import com.cenk.valocase.catalog.repository.SkinRepository;
 import com.cenk.valocase.common.exception.ApiException;
 import com.cenk.valocase.inventory.domain.InventoryItem;
@@ -106,9 +110,11 @@ public class BattleLobbyService {
     private final CaseDefinitionRepository caseDefinitionRepository;
     private final CaseEntryRepository caseEntryRepository;
     private final SkinRepository skinRepository;
+    private final CaseRarityWeightRepository caseRarityWeightRepository;
     private final WalletService walletService;
     private final InventoryService inventoryService;
     private final DropSelector dropSelector;
+    private final CaseRarityRoll caseRarityRoll;
     private final BattleResolver battleResolver;
     private final BattleRepository battleRepository;
     private final BattleParticipantRepository battleParticipantRepository;
@@ -501,6 +507,13 @@ public class BattleLobbyService {
                 .findAllById(allSkinIds)
                 .stream().collect(Collectors.toMap(Skin::getId, Function.identity()));
 
+        // Rarity-first buckets per case (flat fallback when a case has no usable weights).
+        Map<String, List<RarityBucket>> bucketsByCase = new java.util.HashMap<>();
+        for (Map.Entry<String, List<CaseEntry>> e : candidatesByCase.entrySet()) {
+            List<CaseRarityWeight> weights = caseRarityWeightRepository.findByCaseId(e.getKey());
+            bucketsByCase.put(e.getKey(), caseRarityRoll.activeBuckets(e.getValue(), skinsById, weights));
+        }
+
         int n = lobby.getMaxSlots();
         int rounds = openings.size();
         long[] totals = new long[n];
@@ -508,7 +521,10 @@ public class BattleLobbyService {
         for (int p = 0; p < n; p++) {
             List<Skin> rolls = new ArrayList<>(rounds);
             for (String caseId : openings) {
-                CaseEntry entry = dropSelector.selectWeighted(candidatesByCase.get(caseId));
+                List<RarityBucket> buckets = bucketsByCase.get(caseId);
+                CaseEntry entry = (buckets == null || buckets.isEmpty())
+                        ? dropSelector.selectWeighted(candidatesByCase.get(caseId))
+                        : caseRarityRoll.select(buckets);
                 Skin skin = skinsById.get(entry.getSkinId());
                 rolls.add(skin);
                 totals[p] += skin.getVpValue();

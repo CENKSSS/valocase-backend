@@ -23,12 +23,16 @@ import com.cenk.valocase.battle.dto.RolledSkinResponse;
 import com.cenk.valocase.battle.repository.BattleParticipantRepository;
 import com.cenk.valocase.battle.repository.BattleRepository;
 import com.cenk.valocase.battle.repository.BattleRollRepository;
+import com.cenk.valocase.caseopening.service.CaseRarityRoll;
+import com.cenk.valocase.caseopening.service.CaseRarityRoll.RarityBucket;
 import com.cenk.valocase.caseopening.service.DropSelector;
 import com.cenk.valocase.catalog.domain.CaseDefinition;
 import com.cenk.valocase.catalog.domain.CaseEntry;
+import com.cenk.valocase.catalog.domain.CaseRarityWeight;
 import com.cenk.valocase.catalog.domain.Skin;
 import com.cenk.valocase.catalog.repository.CaseDefinitionRepository;
 import com.cenk.valocase.catalog.repository.CaseEntryRepository;
+import com.cenk.valocase.catalog.repository.CaseRarityWeightRepository;
 import com.cenk.valocase.catalog.repository.SkinRepository;
 import com.cenk.valocase.common.exception.ApiException;
 import com.cenk.valocase.inventory.domain.InventoryItem;
@@ -60,9 +64,11 @@ public class BotBattleService {
     private final CaseDefinitionRepository caseDefinitionRepository;
     private final CaseEntryRepository caseEntryRepository;
     private final SkinRepository skinRepository;
+    private final CaseRarityWeightRepository caseRarityWeightRepository;
     private final WalletService walletService;
     private final InventoryService inventoryService;
     private final DropSelector dropSelector;
+    private final CaseRarityRoll caseRarityRoll;
     private final BattleResolver battleResolver;
     private final BattleRepository battleRepository;
     private final BattleParticipantRepository battleParticipantRepository;
@@ -117,13 +123,18 @@ public class BotBattleService {
 
         long entryCost = (long) caseDef.getPriceVp() * rounds;
 
-        // 4. Roll all skins in memory (DropSelector reuse) and compute totals.
+        // 4. Roll all skins in memory with rarity-first odds (flat fallback when
+        // the case has no usable rarity-weight model) and compute totals.
+        List<CaseRarityWeight> rarityWeights = caseRarityWeightRepository.findByCaseId(caseId);
+        List<RarityBucket> buckets = caseRarityRoll.activeBuckets(candidates, skinsById, rarityWeights);
         long[] totals = new long[participantCount];
         List<List<Skin>> rolledByParticipant = new ArrayList<>(participantCount);
         for (int p = 0; p < participantCount; p++) {
             List<Skin> rolls = new ArrayList<>(rounds);
             for (int r = 0; r < rounds; r++) {
-                CaseEntry entry = dropSelector.selectWeighted(candidates);
+                CaseEntry entry = buckets.isEmpty()
+                        ? dropSelector.selectWeighted(candidates)
+                        : caseRarityRoll.select(buckets);
                 Skin skin = skinsById.get(entry.getSkinId());
                 rolls.add(skin);
                 totals[p] += skin.getVpValue();

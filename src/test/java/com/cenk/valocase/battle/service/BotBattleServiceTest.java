@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -29,12 +30,15 @@ import com.cenk.valocase.battle.dto.BattleResultResponse;
 import com.cenk.valocase.battle.repository.BattleParticipantRepository;
 import com.cenk.valocase.battle.repository.BattleRepository;
 import com.cenk.valocase.battle.repository.BattleRollRepository;
+import com.cenk.valocase.caseopening.service.CaseRarityRoll;
+import com.cenk.valocase.caseopening.service.CaseRarityRoll.RarityBucket;
 import com.cenk.valocase.caseopening.service.DropSelector;
 import com.cenk.valocase.catalog.domain.CaseDefinition;
 import com.cenk.valocase.catalog.domain.CaseEntry;
 import com.cenk.valocase.catalog.domain.Skin;
 import com.cenk.valocase.catalog.repository.CaseDefinitionRepository;
 import com.cenk.valocase.catalog.repository.CaseEntryRepository;
+import com.cenk.valocase.catalog.repository.CaseRarityWeightRepository;
 import com.cenk.valocase.catalog.repository.SkinRepository;
 import com.cenk.valocase.common.exception.ApiException;
 import com.cenk.valocase.inventory.domain.InventoryItem;
@@ -49,9 +53,11 @@ class BotBattleServiceTest {
     @Mock private CaseDefinitionRepository caseDefinitionRepository;
     @Mock private CaseEntryRepository caseEntryRepository;
     @Mock private SkinRepository skinRepository;
+    @Mock private CaseRarityWeightRepository caseRarityWeightRepository;
     @Mock private WalletService walletService;
     @Mock private InventoryService inventoryService;
     @Mock private DropSelector dropSelector;
+    @Mock private CaseRarityRoll caseRarityRoll;
     @Mock private BattleResolver battleResolver;
     @Mock private BattleRepository battleRepository;
     @Mock private BattleParticipantRepository battleParticipantRepository;
@@ -197,6 +203,30 @@ class BotBattleServiceTest {
         assertEquals(4, result.grantedInventoryItemIds().size());
         verify(inventoryService, times(4))
                 .addItem(eq(ACCOUNT), eq("skin_a"), eq(BotBattleService.INVENTORY_SOURCE_BATTLE_REWARD), any());
+    }
+
+    @Test
+    void rarityFirst_whenBucketsPresent_usesBucketSelect_notFlatPool() {
+        when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(true, 100)));
+        when(caseEntryRepository.findByCaseIdOrderBySkinIdAsc(CASE_ID)).thenReturn(List.of(entry("skin_a")));
+        when(skinRepository.findAllById(any())).thenReturn(List.of(skin("skin_a", 1000, true)));
+        when(caseRarityRoll.activeBuckets(any(), any(), any()))
+                .thenReturn(List.of(new RarityBucket("Select", 70.0, 1.0, List.of(entry("skin_a")))));
+        when(caseRarityRoll.select(any())).thenReturn(entry("skin_a"));
+        when(battleResolver.winningIndex(any())).thenReturn(1);
+        Wallet wallet = new Wallet();
+        wallet.setVpBalance(9800L);
+        when(walletService.debit(eq(ACCOUNT), anyLong(), any(), any())).thenReturn(wallet);
+        when(battleRepository.saveAndFlush(any(Battle.class))).thenAnswer(inv -> {
+            Battle b = inv.getArgument(0);
+            b.setId(UUID.randomUUID());
+            return b;
+        });
+
+        service.createAndResolve(ACCOUNT, "Tester", "avatar_1", CASE_ID, 2, 2);
+
+        verify(caseRarityRoll, atLeastOnce()).select(any());
+        verify(dropSelector, never()).selectWeighted(any());
     }
 
     @Test
