@@ -30,6 +30,7 @@ import com.cenk.valocase.earnvp.repository.EarnVpSessionRepository;
 import com.cenk.valocase.inventory.domain.InventoryItem;
 import com.cenk.valocase.inventory.repository.InventoryItemRepository;
 import com.cenk.valocase.upgrade.service.UpgradeContextKey;
+import com.cenk.valocase.upgrade.service.UpgradeTargets;
 import com.cenk.valocase.wallet.service.WalletService;
 
 import lombok.RequiredArgsConstructor;
@@ -439,24 +440,18 @@ public class AdRewardService {
         return new ArrayList<>(distinct);
     }
 
+    // The +5 boost binds to the same single-target context preview/execute use, so a
+    // boost can never be claimed for a multi-target selection.
     private List<String> mergeTargetSkinIds(AdRewardClaimRequest request) {
-        if (request.targetSkinIds() != null && !request.targetSkinIds().isEmpty()) {
-            return request.targetSkinIds();
-        }
-        if (request.targetSkinId() != null && !request.targetSkinId().isBlank()) {
-            return List.of(request.targetSkinId());
-        }
-        throw new ApiException(HttpStatus.BAD_REQUEST, "targetSkinIds must not be empty");
+        return List.of(UpgradeTargets.normalizeSingleTarget(request.targetSkinIds(), request.targetSkinId()));
     }
 
     private List<String> mergeTargetSkinIdsLenient(AdRewardClaimRequest request) {
-        if (request.targetSkinIds() != null && !request.targetSkinIds().isEmpty()) {
-            return request.targetSkinIds();
+        try {
+            return List.of(UpgradeTargets.normalizeSingleTarget(request.targetSkinIds(), request.targetSkinId()));
+        } catch (ApiException e) {
+            return List.of();
         }
-        if (request.targetSkinId() != null && !request.targetSkinId().isBlank()) {
-            return List.of(request.targetSkinId());
-        }
-        return List.of();
     }
 
     private UUID parseUuid(String raw, String field) {

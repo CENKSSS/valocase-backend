@@ -203,6 +203,11 @@ public class UpgradeService {
             }
         }
 
+        if (inputItemIds.size() > UpgradeTargets.MAX_INPUT_ITEMS) {
+            throw new ApiException(HttpStatus.BAD_REQUEST,
+                    "inputItemIds must not contain more than " + UpgradeTargets.MAX_INPUT_ITEMS + " items");
+        }
+
         Set<UUID> distinctIds = new LinkedHashSet<>(inputItemIds);
         if (distinctIds.size() != inputItemIds.size()) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Duplicate input item IDs are not allowed");
@@ -219,6 +224,11 @@ public class UpgradeService {
                 throw new ApiException(HttpStatus.BAD_REQUEST, "Duplicate target skin IDs are not allowed");
             }
             targetSkinIds.add(id);
+        }
+
+        // Simplified upgrade contract: exactly one target, no multi-target upgrades.
+        if (targetSkinIds.size() != 1) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Exactly one target skin is required");
         }
 
         Map<String, Skin> targetsById = skinRepository.findAllById(distinctTargets).stream()

@@ -19,6 +19,7 @@ import com.cenk.valocase.adreward.dto.AdRewardClaimResponse;
 import com.cenk.valocase.adreward.dto.AdRewardStatusResponse;
 import com.cenk.valocase.adreward.service.AdRewardService;
 import com.cenk.valocase.common.exception.ApiException;
+import com.cenk.valocase.upgrade.service.UpgradeTargets;
 
 import lombok.RequiredArgsConstructor;
 
@@ -70,14 +71,14 @@ public class AdRewardController {
         return adRewardService.clearEarnVp2x(account.getId(), earnSessionId);
     }
 
+    // Status mirrors the single-target upgrade context; an unresolvable or multi-target
+    // selection yields the generic (no-context) status rather than failing the request.
     private static List<String> mergeTargets(List<String> targetSkinIds, String targetSkinId) {
-        if (targetSkinIds != null && !targetSkinIds.isEmpty()) {
-            return targetSkinIds;
+        try {
+            return List.of(UpgradeTargets.normalizeSingleTarget(targetSkinIds, targetSkinId));
+        } catch (ApiException e) {
+            return List.of();
         }
-        if (targetSkinId != null && !targetSkinId.isBlank()) {
-            return List.of(targetSkinId);
-        }
-        return List.of();
     }
 
     private static AdRewardType parseRewardType(String raw) {

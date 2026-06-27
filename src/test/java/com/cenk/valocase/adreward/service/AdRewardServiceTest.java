@@ -34,10 +34,12 @@ import com.cenk.valocase.adreward.dto.AdRewardClaimResponse;
 import com.cenk.valocase.adreward.dto.AdRewardPlacementStatus;
 import com.cenk.valocase.adreward.dto.AdRewardStatusResponse;
 import com.cenk.valocase.adreward.repository.AdRewardClaimRepository;
+import com.cenk.valocase.catalog.domain.Skin;
 import com.cenk.valocase.catalog.repository.SkinRepository;
 import com.cenk.valocase.common.exception.ApiException;
 import com.cenk.valocase.earnvp.domain.EarnVpSession;
 import com.cenk.valocase.earnvp.repository.EarnVpSessionRepository;
+import com.cenk.valocase.inventory.domain.InventoryItem;
 import com.cenk.valocase.inventory.repository.InventoryItemRepository;
 import com.cenk.valocase.wallet.domain.Wallet;
 import com.cenk.valocase.wallet.dto.WalletResponse;
@@ -287,6 +289,57 @@ class AdRewardServiceTest {
         assertEquals(12500L, r.newVpBalance());
         verify(walletService, never()).credit(any(), anyLong(), any(), any());
         verify(adRewardClaimRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void upgradePlus5Claim_singleTarget_bindsContextAndPersistsBuff() {
+        UUID itemId = UUID.randomUUID();
+        when(adRewardClaimRepository.findByAccountIdAndRewardTypeAndAdToken(
+                ACCOUNT, AdRewardType.UPGRADE_PLUS_5, "ad-u1")).thenReturn(Optional.empty());
+        when(inventoryItemRepository.findByIdInAndAccountId(any(), eq(ACCOUNT)))
+                .thenReturn(List.of(inventoryItem(itemId)));
+        when(skinRepository.findAllById(any())).thenReturn(List.of(activeSkin("skin_t")));
+        when(adRewardClaimRepository.existsByAccountIdAndRewardTypeAndSourceRef(
+                eq(ACCOUNT), eq(AdRewardType.UPGRADE_PLUS_5), any())).thenReturn(false);
+
+        AdRewardClaimResponse r = service.claim(ACCOUNT, AdRewardType.UPGRADE_PLUS_5,
+                new AdRewardClaimRequest("UPGRADE_PLUS_5", "ad-u1", null,
+                        List.of(itemId.toString()), List.of("skin_t"), null));
+
+        assertEquals("OK", r.status());
+        assertTrue(r.upgradePlus5Active());
+        ArgumentCaptor<AdRewardClaim> captor = ArgumentCaptor.forClass(AdRewardClaim.class);
+        verify(adRewardClaimRepository).saveAndFlush(captor.capture());
+        assertEquals(AdRewardType.UPGRADE_PLUS_5, captor.getValue().getRewardType());
+        assertFalse(captor.getValue().isConsumed());
+    }
+
+    @Test
+    void upgradePlus5Claim_rejectsMultipleTargets_andPersistsNothing() {
+        when(adRewardClaimRepository.findByAccountIdAndRewardTypeAndAdToken(
+                ACCOUNT, AdRewardType.UPGRADE_PLUS_5, "ad-u2")).thenReturn(Optional.empty());
+
+        ApiException ex = assertThrows(ApiException.class, () -> service.claim(
+                ACCOUNT, AdRewardType.UPGRADE_PLUS_5,
+                new AdRewardClaimRequest("UPGRADE_PLUS_5", "ad-u2", null,
+                        List.of(UUID.randomUUID().toString()), List.of("skin_t1", "skin_t2"), null)));
+
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        verify(adRewardClaimRepository, never()).saveAndFlush(any());
+    }
+
+    private static InventoryItem inventoryItem(UUID id) {
+        InventoryItem i = new InventoryItem();
+        i.setId(id);
+        i.setAccountId(ACCOUNT);
+        return i;
+    }
+
+    private static Skin activeSkin(String id) {
+        Skin s = new Skin();
+        s.setId(id);
+        s.setActive(true);
+        return s;
     }
 
     private static final AdRewardType MARKET = AdRewardType.MARKET_VP_2500;

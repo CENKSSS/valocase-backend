@@ -1,7 +1,5 @@
 package com.cenk.valocase.upgrade.web;
 
-import java.util.List;
-
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -17,6 +15,7 @@ import com.cenk.valocase.upgrade.dto.UpgradePreviewResponse;
 import com.cenk.valocase.upgrade.dto.UpgradeRequest;
 import com.cenk.valocase.upgrade.dto.UpgradeResultResponse;
 import com.cenk.valocase.upgrade.service.UpgradeService;
+import com.cenk.valocase.upgrade.service.UpgradeTargets;
 
 import lombok.RequiredArgsConstructor;
 
@@ -42,8 +41,8 @@ public class UpgradeController {
             throw new ApiException(HttpStatus.BAD_REQUEST,
                     "Request body with inputItemIds and targetSkinIds is required");
         }
-        List<String> targetSkinIds = resolveTargetSkinIds(request);
-        return upgradeService.upgrade(account.getId(), request.inputItemIds(), targetSkinIds);
+        String targetSkinId = UpgradeTargets.normalizeSingleTarget(request.targetSkinIds(), request.targetSkinId());
+        return upgradeService.upgrade(account.getId(), request.inputItemIds(), targetSkinId);
     }
 
     /** Read-only preview of the exact chance the real upgrade would use. */
@@ -56,16 +55,7 @@ public class UpgradeController {
             throw new ApiException(HttpStatus.BAD_REQUEST,
                     "Request body with inputInventoryItemIds and targetSkinId is required");
         }
-        return upgradeService.preview(account.getId(), request.inputInventoryItemIds(), request.targetSkinId());
-    }
-
-    private static List<String> resolveTargetSkinIds(UpgradeRequest request) {
-        if (request.targetSkinIds() != null && !request.targetSkinIds().isEmpty()) {
-            return request.targetSkinIds();
-        }
-        if (request.targetSkinId() != null && !request.targetSkinId().isBlank()) {
-            return List.of(request.targetSkinId());
-        }
-        throw new ApiException(HttpStatus.BAD_REQUEST, "targetSkinIds must not be empty");
+        String targetSkinId = UpgradeTargets.normalizeSingleTarget(request.targetSkinIds(), request.targetSkinId());
+        return upgradeService.preview(account.getId(), request.inputInventoryItemIds(), targetSkinId);
     }
 }

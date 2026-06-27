@@ -3,6 +3,7 @@ package com.cenk.valocase.upgrade.service;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.never;
@@ -18,10 +19,12 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.http.HttpStatus;
 
 import com.cenk.valocase.adreward.service.AdRewardService;
 import com.cenk.valocase.catalog.domain.Skin;
 import com.cenk.valocase.catalog.repository.SkinRepository;
+import com.cenk.valocase.common.exception.ApiException;
 import com.cenk.valocase.inventory.domain.InventoryItem;
 import com.cenk.valocase.inventory.repository.InventoryItemRepository;
 import com.cenk.valocase.inventory.service.InventoryService;
@@ -154,6 +157,19 @@ class UpgradePreviewServiceTest {
         assertEquals(UpgradeService.CODE_UPGRADE_NOT_POSSIBLE, response.reason());
         assertEquals(5000, response.inputValue());
         assertEquals(3550, response.targetValue());
+    }
+
+    @Test
+    void moreThanFourInputs_throws400() {
+        List<String> fiveInputs = List.of(
+                UUID.randomUUID().toString(), UUID.randomUUID().toString(), UUID.randomUUID().toString(),
+                UUID.randomUUID().toString(), UUID.randomUUID().toString());
+
+        ApiException ex = assertThrows(ApiException.class,
+                () -> upgradeService.preview(ACCOUNT, fiveInputs, TARGET));
+
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        verify(inventoryItemRepository, never()).findByIdInAndAccountId(any(), any());
     }
 
     @Test
