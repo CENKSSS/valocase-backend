@@ -18,66 +18,68 @@ class UpgradeChanceCalculatorTest {
     }
 
     @Test
-    void computesRatioChance() {
+    void computesRatioChanceWithHouseFactor() {
         UpgradeChanceCalculator calc = withRoll(0.0);
-        assertEquals(50.0, calc.computeChance(5000, 10000), 0.0001);
+        // 5000/10000 -> 50% raw, * 0.85 house factor -> 42.5%.
+        assertEquals(42.5, calc.computeChance(5000, 10000), 0.0001);
+    }
+
+    @Test
+    void houseFactorIsFifteenPercentHarder() {
+        UpgradeChanceCalculator calc = withRoll(0.0);
+        // Old 40% (4000/10000) -> 34%, old 20% -> 17%, old 10% -> 8.5%.
+        assertEquals(34.0, calc.computeChance(4000, 10000), 0.0001);
+        assertEquals(17.0, calc.computeChance(2000, 10000), 0.0001);
+        assertEquals(8.5, calc.computeChance(1000, 10000), 0.0001);
+    }
+
+    @Test
+    void houseFactorConstantIsZeroPointEightFive() {
+        assertEquals(0.85, UpgradeChanceCalculator.HOUSE_FACTOR, 0.0001);
     }
 
     @Test
     void clampsToGlobalMaxChance() {
         UpgradeChanceCalculator calc = withRoll(0.0);
-        // 9500/10000 -> 95% raw, capped to the 65% global maximum.
+        // 9500/10000 -> 95% raw, * 0.85 = 80.75%, capped to the 55.25% global maximum.
         assertEquals(UpgradeChanceCalculator.GLOBAL_MAX_CHANCE, calc.computeChance(9500, 10000), 0.0001);
     }
 
     @Test
-    void normalChanceNeverExceedsSixtyFive() {
+    void normalCapIsFiftyFivePointTwoFive() {
         UpgradeChanceCalculator calc = withRoll(0.0);
-        // 9999/10000 -> 99.99% raw, still capped at 65% without a boost.
-        assertEquals(65.0, calc.computeChance(9999, 10000), 0.0001);
-    }
-
-    @Test
-    void meleeTargetNoLongerCapped() {
-        UpgradeChanceCalculator calc = withRoll(0.0);
-        // There is no longer a Melee-specific cap: a high-ratio upgrade hits the 65% global cap,
-        // exactly like any non-Melee target (previously this was forced down to 5%).
-        assertEquals(65.0, calc.computeChance(9000, 10000), 0.0001);
-    }
-
-    @Test
-    void multipleMeleeInputsNoLongerPenalized() {
-        UpgradeChanceCalculator calc = withRoll(0.0);
-        // 4000/10000 -> 40% raw, no multi-Melee halving applied anymore -> stays 40%.
-        assertEquals(40.0, calc.computeChance(4000, 10000), 0.0001);
+        // 9999/10000 -> 99.99% raw, * 0.85, still capped at 55.25% without a boost.
+        assertEquals(55.25, UpgradeChanceCalculator.GLOBAL_MAX_CHANCE, 0.0001);
+        assertEquals(55.25, calc.computeChance(9999, 10000), 0.0001);
     }
 
     @Test
     void boostAddsFlatFivePercentagePoints() {
         UpgradeChanceCalculator calc = withRoll(0.0);
-        // 3000/10000 -> 30% base, +5 boost -> 35% (additive, not a multiplier).
-        assertEquals(35.0, calc.computeChance(3000, 10000, 5.0), 0.0001);
+        // 3000/10000 -> 30% raw, * 0.85 = 25.5% base, +5 boost -> 30.5% (additive, not a multiplier).
+        assertEquals(30.5, calc.computeChance(3000, 10000, 5.0), 0.0001);
     }
 
     @Test
     void boostIsAdditiveNotMultiplier() {
         UpgradeChanceCalculator calc = withRoll(0.0);
-        // 5000/10000 -> 50% base. Additive +5 -> 55%, NOT 50 * 1.05 = 52.5 and NOT 50 * 5.
-        assertEquals(55.0, calc.computeChance(5000, 10000, 5.0), 0.0001);
+        // 5000/10000 -> 50% raw, * 0.85 = 42.5% base. Additive +5 -> 47.5%,
+        // NOT 42.5 * 1.05 = 44.625 and NOT 42.5 * 5.
+        assertEquals(47.5, calc.computeChance(5000, 10000, 5.0), 0.0001);
     }
 
     @Test
-    void boostedChanceCappedAtSeventy() {
+    void boostedCapIsSixtyPointTwoFive() {
         UpgradeChanceCalculator calc = withRoll(0.0);
-        // 9500/10000 -> 95% raw, base capped at 65, +5 boost -> 70 (boosted ceiling).
-        assertEquals(70.0, calc.computeChance(9500, 10000, 5.0), 0.0001);
+        // 9500/10000 -> 80.75% after house factor, base capped at 55.25, +5 boost -> 60.25 (boosted ceiling).
+        assertEquals(60.25, calc.computeChance(9500, 10000, 5.0), 0.0001);
     }
 
     @Test
-    void boostedChanceNeverExceedsSeventy() {
+    void boostedChanceNeverExceedsSixtyPointTwoFive() {
         UpgradeChanceCalculator calc = withRoll(0.0);
-        // Even at full ratio the boosted result is exactly 70, never above.
-        assertEquals(70.0, calc.computeChance(10000, 10000, 5.0), 0.0001);
+        // Even at full ratio the boosted result is exactly 60.25, never above.
+        assertEquals(60.25, calc.computeChance(10000, 10000, 5.0), 0.0001);
     }
 
     @Test

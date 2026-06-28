@@ -108,13 +108,13 @@ class UpgradePreviewServiceTest {
 
         UpgradePreviewResponse response = upgradeService.preview(ACCOUNT, List.of(itemId.toString()), TARGET);
 
-        // 4000/4350 -> ~91.95% raw, capped only by the 65% global cap; no Melee-specific 5% cap.
+        // 4000/4350 -> ~91.95% raw, * 0.85 = ~78.16%, capped only by the 55.25% global cap; no Melee-specific 5% cap.
         assertTrue(response.canUpgrade());
-        assertEquals(65.0, response.chancePercent(), 0.0001);
+        assertEquals(55.25, response.chancePercent(), 0.0001);
     }
 
     @Test
-    void nonMelee_capsAtGlobalSixtyFive() {
+    void nonMelee_capsAtGlobalFiftyFivePointTwoFive() {
         UUID itemId = UUID.randomUUID();
         when(inventoryItemRepository.findByIdInAndAccountId(any(), any()))
                 .thenReturn(List.of(item(itemId, "skin_in")));
@@ -123,7 +123,7 @@ class UpgradePreviewServiceTest {
 
         UpgradePreviewResponse response = upgradeService.preview(ACCOUNT, List.of(itemId.toString()), TARGET);
 
-        assertEquals(65.0, response.chancePercent(), 0.0001);
+        assertEquals(55.25, response.chancePercent(), 0.0001);
     }
 
     @Test
@@ -138,13 +138,13 @@ class UpgradePreviewServiceTest {
         UpgradePreviewResponse response = upgradeService.preview(
                 ACCOUNT, List.of(i1.toString(), i2.toString()), TARGET);
 
-        // 1740/4350 -> 40% raw, with no multi-Melee penalty it stays 40%, under the 65% cap.
-        assertEquals(40.0, response.chancePercent(), 0.0001);
+        // 1740/4350 -> 40% raw, * 0.85 = 34%, with no multi-Melee penalty, under the 55.25% cap.
+        assertEquals(34.0, response.chancePercent(), 0.0001);
         assertEquals(calculator.computeChance(1740, 4350), response.chancePercent(), 0.0001);
     }
 
     @Test
-    void boostedPreview_canShowUpToSeventy() {
+    void boostedPreview_canShowUpToSixtyPointTwoFive() {
         UUID itemId = UUID.randomUUID();
         when(inventoryItemRepository.findByIdInAndAccountId(any(), any()))
                 .thenReturn(List.of(item(itemId, "skin_in")));
@@ -154,9 +154,9 @@ class UpgradePreviewServiceTest {
 
         UpgradePreviewResponse response = upgradeService.preview(ACCOUNT, List.of(itemId.toString()), TARGET);
 
-        // 4000/4350 -> base capped at 65, +5 boost -> 70 (boosted ceiling).
+        // 4000/4350 -> base capped at 55.25, +5 boost -> 60.25 (boosted ceiling).
         assertTrue(response.canUpgrade());
-        assertEquals(70.0, response.chancePercent(), 0.0001);
+        assertEquals(60.25, response.chancePercent(), 0.0001);
         assertEquals(5.0, response.appliedAdBuffPercent(), 0.0001);
     }
 
@@ -171,8 +171,8 @@ class UpgradePreviewServiceTest {
 
         UpgradePreviewResponse response = upgradeService.preview(ACCOUNT, List.of(itemId.toString()), TARGET);
 
-        // 870/4350 -> 20% base, +5 additive -> 25% (not a multiplier).
-        assertEquals(25.0, response.chancePercent(), 0.0001);
+        // 870/4350 -> 20% raw, * 0.85 = 17% base, +5 additive -> 22% (not a multiplier).
+        assertEquals(22.0, response.chancePercent(), 0.0001);
     }
 
     @Test
