@@ -79,18 +79,19 @@ public class UpgradeService {
         long inputValue = v.inputValue();
         long targetValue = v.targetValue();
 
-        // Input value must not exceed target value (no downgrade); blocks cleanly.
-        if (inputValue > targetValue) {
+        // Target value must be strictly greater than total input value; blocks cleanly
+        // (equal- or lower-value targets are not upgradeable).
+        if (inputValue >= targetValue) {
             throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY,
-                    "Total input value (" + inputValue + ") must not exceed target value (" + targetValue + ")",
+                    "Total input value (" + inputValue + ") must be strictly less than target value ("
+                            + targetValue + ")",
                     CODE_UPGRADE_NOT_POSSIBLE);
         }
 
         String contextKey = UpgradeContextKey.compute(
                 items.stream().map(InventoryItem::getId).toList(), targetSkinIds);
         double adBuffPercent = adRewardService.consumeUpgradeBuffForContext(accountId, contextKey);
-        double chance = chanceCalculator.computeChance(
-                inputValue, targetValue, v.targetIsMelee(), v.meleeInputCount(), adBuffPercent);
+        double chance = chanceCalculator.computeChance(inputValue, targetValue, adBuffPercent);
         boolean success = chanceCalculator.roll(chance);
 
         // 10. Record the attempt first (gives a stable upgradeId).
@@ -169,7 +170,7 @@ public class UpgradeService {
         }
         Valuation v = valuate(accountId, rawInputItemIds, List.of(rawTargetSkinId), false);
 
-        if (v.inputValue() > v.targetValue()) {
+        if (v.inputValue() >= v.targetValue()) {
             return new UpgradePreviewResponse(
                     false, 0.0, CODE_UPGRADE_NOT_POSSIBLE, v.inputValue(), v.targetValue(), 0.0);
         }
@@ -177,8 +178,7 @@ public class UpgradeService {
         String contextKey = UpgradeContextKey.compute(
                 v.items().stream().map(InventoryItem::getId).toList(), v.targetSkinIds());
         double adBuffPercent = adRewardService.peekUpgradeBuffPercentForContext(accountId, contextKey);
-        double chance = chanceCalculator.computeChance(
-                v.inputValue(), v.targetValue(), v.targetIsMelee(), v.meleeInputCount(), adBuffPercent);
+        double chance = chanceCalculator.computeChance(v.inputValue(), v.targetValue(), adBuffPercent);
         return new UpgradePreviewResponse(true, chance, null, v.inputValue(), v.targetValue(), adBuffPercent);
     }
 
@@ -258,20 +258,12 @@ public class UpgradeService {
         long inputValue = items.stream().mapToLong(item -> skinValue(skinsById, item.getSkinId())).sum();
         long targetValue = targetSkinIds.stream().mapToLong(id -> targetsById.get(id).getVpValue()).sum();
 
-        boolean targetIsMelee = targetSkinIds.stream().anyMatch(id -> isMelee(targetsById.get(id)));
-        int meleeInputCount = (int) items.stream().filter(item -> isMelee(skinsById.get(item.getSkinId()))).count();
-
-        return new Valuation(items, skinsById, targetsById, targetSkinIds,
-                inputValue, targetValue, targetIsMelee, meleeInputCount);
+        return new Valuation(items, skinsById, targetsById, targetSkinIds, inputValue, targetValue);
     }
 
     private static long skinValue(Map<String, Skin> skinsById, String skinId) {
         Skin skin = skinsById.get(skinId);
         return skin != null ? skin.getVpValue() : 0;
-    }
-
-    private static boolean isMelee(Skin skin) {
-        return skin != null && "Melee".equalsIgnoreCase(skin.getWeapon());
     }
 
     private record Valuation(
@@ -280,8 +272,6 @@ public class UpgradeService {
             Map<String, Skin> targetsById,
             List<String> targetSkinIds,
             long inputValue,
-            long targetValue,
-            boolean targetIsMelee,
-            int meleeInputCount) {
+            long targetValue) {
     }
 }

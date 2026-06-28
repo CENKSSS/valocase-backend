@@ -95,11 +95,11 @@ class UpgradePreviewServiceTest {
         assertNull(response.reason());
         assertEquals(3550, response.inputValue());
         assertEquals(4350, response.targetValue());
-        assertEquals(calculator.computeChance(3550, 4350, false, 0), response.chancePercent(), 0.0001);
+        assertEquals(calculator.computeChance(3550, 4350), response.chancePercent(), 0.0001);
     }
 
     @Test
-    void meleeTarget_capsAtFivePercent() {
+    void meleeTarget_noLongerCappedAtFivePercent() {
         UUID itemId = UUID.randomUUID();
         when(inventoryItemRepository.findByIdInAndAccountId(any(), any()))
                 .thenReturn(List.of(item(itemId, "skin_in")));
@@ -108,8 +108,9 @@ class UpgradePreviewServiceTest {
 
         UpgradePreviewResponse response = upgradeService.preview(ACCOUNT, List.of(itemId.toString()), TARGET);
 
+        // 4000/4350 -> ~91.95% raw, capped only by the 65% global cap; no Melee-specific 5% cap.
         assertTrue(response.canUpgrade());
-        assertEquals(5.0, response.chancePercent(), 0.0001);
+        assertEquals(65.0, response.chancePercent(), 0.0001);
     }
 
     @Test
@@ -126,7 +127,7 @@ class UpgradePreviewServiceTest {
     }
 
     @Test
-    void multipleMeleeInputs_penaltyAppliesBeforeCaps() {
+    void multipleMeleeInputs_noLongerPenalized() {
         UUID i1 = UUID.randomUUID();
         UUID i2 = UUID.randomUUID();
         when(inventoryItemRepository.findByIdInAndAccountId(any(), any()))
@@ -137,9 +138,56 @@ class UpgradePreviewServiceTest {
         UpgradePreviewResponse response = upgradeService.preview(
                 ACCOUNT, List.of(i1.toString(), i2.toString()), TARGET);
 
-        // 1740/4350 -> 40% raw, halved by two Melee inputs -> 20%, under the 65% cap.
-        assertEquals(20.0, response.chancePercent(), 0.0001);
-        assertEquals(calculator.computeChance(1740, 4350, false, 2), response.chancePercent(), 0.0001);
+        // 1740/4350 -> 40% raw, with no multi-Melee penalty it stays 40%, under the 65% cap.
+        assertEquals(40.0, response.chancePercent(), 0.0001);
+        assertEquals(calculator.computeChance(1740, 4350), response.chancePercent(), 0.0001);
+    }
+
+    @Test
+    void boostedPreview_canShowUpToSeventy() {
+        UUID itemId = UUID.randomUUID();
+        when(inventoryItemRepository.findByIdInAndAccountId(any(), any()))
+                .thenReturn(List.of(item(itemId, "skin_in")));
+        when(skinRepository.findAllById(any()))
+                .thenReturn(List.of(skin(TARGET, 4350, true), skin("skin_in", 4000, true)));
+        when(adRewardService.peekUpgradeBuffPercentForContext(any(), any())).thenReturn(5.0);
+
+        UpgradePreviewResponse response = upgradeService.preview(ACCOUNT, List.of(itemId.toString()), TARGET);
+
+        // 4000/4350 -> base capped at 65, +5 boost -> 70 (boosted ceiling).
+        assertTrue(response.canUpgrade());
+        assertEquals(70.0, response.chancePercent(), 0.0001);
+        assertEquals(5.0, response.appliedAdBuffPercent(), 0.0001);
+    }
+
+    @Test
+    void boostedPreview_isAdditiveFivePoints() {
+        UUID itemId = UUID.randomUUID();
+        when(inventoryItemRepository.findByIdInAndAccountId(any(), any()))
+                .thenReturn(List.of(item(itemId, "skin_in")));
+        when(skinRepository.findAllById(any()))
+                .thenReturn(List.of(skin(TARGET, 4350, true), skin("skin_in", 870, true)));
+        when(adRewardService.peekUpgradeBuffPercentForContext(any(), any())).thenReturn(5.0);
+
+        UpgradePreviewResponse response = upgradeService.preview(ACCOUNT, List.of(itemId.toString()), TARGET);
+
+        // 870/4350 -> 20% base, +5 additive -> 25% (not a multiplier).
+        assertEquals(25.0, response.chancePercent(), 0.0001);
+    }
+
+    @Test
+    void equalValueTarget_returnsBlockedZeroChance() {
+        UUID itemId = UUID.randomUUID();
+        when(inventoryItemRepository.findByIdInAndAccountId(any(), any()))
+                .thenReturn(List.of(item(itemId, "skin_in")));
+        when(skinRepository.findAllById(any()))
+                .thenReturn(List.of(skin(TARGET, 4350, true), skin("skin_in", 4350, true)));
+
+        UpgradePreviewResponse response = upgradeService.preview(ACCOUNT, List.of(itemId.toString()), TARGET);
+
+        assertFalse(response.canUpgrade());
+        assertEquals(0.0, response.chancePercent(), 0.0001);
+        assertEquals(UpgradeService.CODE_UPGRADE_NOT_POSSIBLE, response.reason());
     }
 
     @Test

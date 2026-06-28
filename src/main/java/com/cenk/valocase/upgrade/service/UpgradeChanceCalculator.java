@@ -12,10 +12,10 @@ import lombok.RequiredArgsConstructor;
  * chance is the single source of truth: it is both the value sent to the client
  * and the value rolled against, so the displayed and actual chances always match.
  *
- * base = (inputValue / targetValue) * 100 * houseFactor. More than one Melee
- * input halves it. The result is then capped at the global maximum, capped again
- * at the far stricter Melee-target maximum when the target is Melee, and finally
- * floored at the minimum.
+ * base = (inputValue / targetValue) * 100 * houseFactor, capped at the global
+ * maximum of 65%. The Upgrade +5 ad boost adds a flat +5 percentage points on top
+ * of the capped base, raising the ceiling to 70%. The result is finally floored at
+ * the minimum. There are no weapon- or rarity-specific caps.
  */
 @Component
 @RequiredArgsConstructor
@@ -23,39 +23,38 @@ public class UpgradeChanceCalculator {
 
     public static final double HOUSE_FACTOR = 1.0;
     public static final double MIN_CHANCE = 1.0;
+
+    /** Normal upgrade ceiling, with no ad boost active. */
     public static final double GLOBAL_MAX_CHANCE = 65.0;
-    public static final double MELEE_TARGET_MAX_CHANCE = 5.0;
-    public static final double MULTI_MELEE_INPUT_FACTOR = 0.5;
 
     private final UpgradeRng rng;
 
     /** @return the final success chance as a percentage, rounded to 2 decimals. */
-    public double computeChance(long inputValue, long targetValue, boolean targetIsMelee, int meleeInputCount) {
-        return computeChance(inputValue, targetValue, targetIsMelee, meleeInputCount, 0.0);
+    public double computeChance(long inputValue, long targetValue) {
+        return computeChance(inputValue, targetValue, 0.0);
     }
 
     /**
-     * Same as {@link #computeChance(long, long, boolean, int)} but adds an ad-buff
-     * bonus (percentage points) before the caps, so the buff cannot push a result
-     * past the global or Melee maximum.
+     * Computes the success chance with an optional additive ad-boost bonus.
+     *
+     * <p>The base ratio chance is capped at {@link #GLOBAL_MAX_CHANCE} (65%) first,
+     * then {@code bonusPercent} is added on top as flat percentage points. With the
+     * Upgrade +5 boost ({@code bonusPercent == 5}) this yields a maximum of 70%.
+     * The bonus is additive, never a multiplier.
      *
      * @return the final success chance as a percentage, rounded to 2 decimals.
      */
-    public double computeChance(long inputValue, long targetValue, boolean targetIsMelee,
-                                int meleeInputCount, double bonusPercent) {
+    public double computeChance(long inputValue, long targetValue, double bonusPercent) {
         if (targetValue <= 0) {
             throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "Invalid target value for upgrade");
         }
-        double chance = ((double) inputValue / (double) targetValue) * 100.0 * HOUSE_FACTOR;
-        if (meleeInputCount > 1) {
-            chance *= MULTI_MELEE_INPUT_FACTOR;
-        }
+        double base = ((double) inputValue / (double) targetValue) * 100.0 * HOUSE_FACTOR;
+        // Global cap applies to the base before any boost: normal chance never exceeds 65%.
+        base = Math.min(base, GLOBAL_MAX_CHANCE);
+        double chance = base;
         if (bonusPercent > 0.0) {
-            chance += bonusPercent;
-        }
-        chance = Math.min(chance, GLOBAL_MAX_CHANCE);
-        if (targetIsMelee) {
-            chance = Math.min(chance, MELEE_TARGET_MAX_CHANCE);
+            // +5 boost is additive: base (<= 65) + 5 -> max 70, never exceeding 65 + bonus.
+            chance = Math.min(base + bonusPercent, GLOBAL_MAX_CHANCE + bonusPercent);
         }
         chance = Math.max(chance, MIN_CHANCE);
         return Math.round(chance * 100.0) / 100.0;

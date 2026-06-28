@@ -153,7 +153,7 @@ class UpgradeServiceTest {
                 .thenReturn(List.of(item(itemId, "skin_in")));
         when(skinRepository.findAllById(any()))
                 .thenReturn(List.of(skin(TARGET, 5000, true), skin("skin_in", 1000, true)));
-        when(chanceCalculator.computeChance(1000L, 5000L, false, 0, 0.0)).thenReturn(20.0);
+        when(chanceCalculator.computeChance(1000L, 5000L, 0.0)).thenReturn(20.0);
         when(chanceCalculator.roll(20.0)).thenReturn(true);
         when(upgradeRepository.saveAndFlush(any(Upgrade.class))).thenAnswer(inv -> {
             Upgrade u = inv.getArgument(0);
@@ -250,7 +250,7 @@ class UpgradeServiceTest {
                         item(i3, "skin_in"), item(i4, "skin_in")));
         when(skinRepository.findAllById(any()))
                 .thenReturn(List.of(skin(TARGET, 5000, true), skin("skin_in", 1000, true)));
-        when(chanceCalculator.computeChance(4000L, 5000L, false, 0, 0.0)).thenReturn(60.0);
+        when(chanceCalculator.computeChance(4000L, 5000L, 0.0)).thenReturn(60.0);
         when(chanceCalculator.roll(60.0)).thenReturn(true);
         when(upgradeRepository.saveAndFlush(any(Upgrade.class))).thenAnswer(inv -> {
             Upgrade u = inv.getArgument(0);
@@ -289,32 +289,54 @@ class UpgradeServiceTest {
     }
 
     @Test
-    void equalValueAllowed_forwardsMeleeFlags_andDisplayedChanceMatchesRoll() {
+    void equalValueTarget_throws422_rollsNothing_consumesNothing_grantsNothing() {
         UUID i1 = UUID.randomUUID();
         UUID i2 = UUID.randomUUID();
-        UUID upgradeId = UUID.randomUUID();
 
         when(inventoryItemRepository.findForUpdateByIdInAndAccountId(any(), any()))
                 .thenReturn(List.of(item(i1, "m1"), item(i2, "m2")));
         when(skinRepository.findAllById(any())).thenReturn(List.of(
                 meleeSkin(TARGET, 10000), meleeSkin("m1", 5000), meleeSkin("m2", 5000)));
-        when(chanceCalculator.computeChance(10000L, 10000L, true, 2, 0.0)).thenReturn(5.0);
-        when(chanceCalculator.roll(5.0)).thenReturn(false);
+
+        ApiException ex = assertThrows(ApiException.class, () -> upgradeService.upgrade(
+                ACCOUNT, List.of(i1.toString(), i2.toString()), TARGET));
+
+        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, ex.getStatus());
+        assertEquals(UpgradeService.CODE_UPGRADE_NOT_POSSIBLE, ex.getCode());
+        verify(chanceCalculator, never()).roll(anyDouble());
+        verify(inventoryItemRepository, never()).deleteAll(any());
+        verify(inventoryService, never()).addItem(any(), any(), any(), any());
+    }
+
+    @Test
+    void boostedExecute_usesUpToSeventy_andRollsAgainstSameChance() {
+        UUID itemId = UUID.randomUUID();
+        UUID upgradeId = UUID.randomUUID();
+        UUID grantedId = UUID.randomUUID();
+
+        when(inventoryItemRepository.findForUpdateByIdInAndAccountId(any(), any()))
+                .thenReturn(List.of(item(itemId, "skin_in")));
+        when(skinRepository.findAllById(any()))
+                .thenReturn(List.of(skin(TARGET, 5000, true), skin("skin_in", 4900, true)));
+        when(adRewardService.consumeUpgradeBuffForContext(any(), any())).thenReturn(5.0);
+        // Base would cap at 65; with the +5 boost the calculator returns the 70 ceiling.
+        when(chanceCalculator.computeChance(4900L, 5000L, 5.0)).thenReturn(70.0);
+        when(chanceCalculator.roll(70.0)).thenReturn(true);
         when(upgradeRepository.saveAndFlush(any(Upgrade.class))).thenAnswer(inv -> {
             Upgrade u = inv.getArgument(0);
             u.setId(upgradeId);
             return u;
         });
+        when(inventoryService.addItem(ACCOUNT, TARGET, UpgradeService.INVENTORY_SOURCE_UPGRADE, null))
+                .thenReturn(inventoryItem(grantedId));
 
-        UpgradeResultResponse result = upgradeService.upgrade(
-                ACCOUNT, List.of(i1.toString(), i2.toString()), TARGET);
+        UpgradeResultResponse result = upgradeService.upgrade(ACCOUNT, List.of(itemId.toString()), TARGET);
 
-        assertFalse(result.success());
-        assertEquals(5.0, result.chance(), 0.0001);
-        verify(chanceCalculator).computeChance(10000L, 10000L, true, 2, 0.0);
-        verify(chanceCalculator).roll(5.0);
-        verify(inventoryItemRepository).deleteAll(any());
-        verify(inventoryService, never()).addItem(any(), any(), any(), any());
+        assertTrue(result.success());
+        assertEquals(70.0, result.chance(), 0.0001);
+        assertEquals(5.0, result.appliedAdBuffPercent(), 0.0001);
+        verify(chanceCalculator).computeChance(4900L, 5000L, 5.0);
+        verify(chanceCalculator).roll(70.0);
     }
 
     @Test
@@ -326,7 +348,7 @@ class UpgradeServiceTest {
                 .thenReturn(List.of(item(itemId, "skin_in")));
         when(skinRepository.findAllById(any()))
                 .thenReturn(List.of(skin(TARGET, 5000, true), skin("skin_in", 1000, true)));
-        when(chanceCalculator.computeChance(1000L, 5000L, false, 0, 0.0)).thenReturn(20.0);
+        when(chanceCalculator.computeChance(1000L, 5000L, 0.0)).thenReturn(20.0);
         when(chanceCalculator.roll(20.0)).thenReturn(false);
         when(upgradeRepository.saveAndFlush(any(Upgrade.class))).thenAnswer(inv -> {
             Upgrade u = inv.getArgument(0);
