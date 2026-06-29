@@ -2,6 +2,8 @@ package com.cenk.valocase.battle.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -23,6 +25,7 @@ import java.util.UUID;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -908,5 +911,138 @@ class BattleLobbyServiceTest {
         // Viewer is not a participant: no inventory reward and no XP for them.
         verify(inventoryService, never()).addItem(eq(OTHER), any(), any(), any());
         verify(progressionService, never()).grantCaseOpenXp(argThat(a -> OTHER.equals(a.getId())), anyInt());
+    }
+
+    // --- Free Lobby Event ------------------------------------------------------
+
+    private void stubEventCases() {
+        when(caseDefinitionRepository.findById("classic_basic")).thenReturn(Optional.of(caseDef("classic_basic", 1150)));
+        when(caseDefinitionRepository.findById("ghost_basic")).thenReturn(Optional.of(caseDef("ghost_basic", 1150)));
+        when(caseDefinitionRepository.findById("bulldog_basic")).thenReturn(Optional.of(caseDef("bulldog_basic", 1150)));
+        when(caseDefinitionRepository.findById("vandal_basic")).thenReturn(Optional.of(caseDef("vandal_basic", 1150)));
+        when(caseDefinitionRepository.findById("melee_basic")).thenReturn(Optional.of(caseDef("melee_basic", 1150)));
+    }
+
+    private BattleLobby eventLobby() {
+        BattleLobby lobby = new BattleLobby();
+        lobby.setId(LOBBY);
+        lobby.setCreatorAccountId(BattleLobbyService.SYSTEM_EVENT_ACCOUNT_ID);
+        lobby.setCaseId("classic_basic");
+        lobby.setRounds(25);
+        lobby.setMaxSlots(BattleLobbyService.EVENT_LOBBY_SLOTS);
+        lobby.setEntryCost(0L);
+        lobby.setStatus(LobbyStatus.WAITING);
+        lobby.setCreatedAt(Instant.now().minus(10, ChronoUnit.SECONDS));
+        lobby.setEvent(true);
+        lobby.setEventWindowKey("free-event-123");
+        return lobby;
+    }
+
+    @Test
+    void createEventLobby_createsOneFreeSystemLobby_withNoRealHost_andNoCharge() {
+        stubEventCases();
+        when(lobbyRepository.existsByEventWindowKey(any())).thenReturn(false);
+        when(lobbyRepository.saveAndFlush(any(BattleLobby.class))).thenAnswer(inv -> {
+            BattleLobby l = inv.getArgument(0);
+            l.setId(LOBBY);
+            return l;
+        });
+        when(slotRepository.saveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        Optional<UUID> created = service.createEventLobby();
+
+        assertTrue(created.isPresent());
+        verify(lobbyRepository).saveAndFlush(argThat(l ->
+                l.isEvent()
+                && l.getEntryCost() == 0L
+                && BattleLobbyService.SYSTEM_EVENT_ACCOUNT_ID.equals(l.getCreatorAccountId())
+                && l.getRounds() == 25
+                && l.getEventWindowKey() != null));
+        verify(walletService, never()).debit(any(), anyLong(), any(), any());
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<BattleLobbySlot>> slotsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(slotRepository).saveAll(slotsCaptor.capture());
+        List<BattleLobbySlot> slots = slotsCaptor.getValue();
+        assertEquals(BattleLobbyService.EVENT_LOBBY_SLOTS, slots.size());
+        assertTrue(slots.stream().allMatch(s -> s.getSlotType() == SlotType.EMPTY));
+        assertTrue(slots.stream().noneMatch(BattleLobbySlot::isCreator));
+        assertTrue(slots.stream().allMatch(s -> s.getChargedVp() == 0L));
+    }
+
+    @Test
+    void createEventLobby_skipsWhenWindowAlreadyHasOne() {
+        when(lobbyRepository.existsByEventWindowKey(any())).thenReturn(true);
+
+        Optional<UUID> created = service.createEventLobby();
+
+        assertTrue(created.isEmpty());
+        verify(lobbyRepository, never()).saveAndFlush(any());
+        verify(walletService, never()).debit(any(), anyLong(), any(), any());
+    }
+
+    @Test
+    void eventLobby_appearsInList_withFreeMarker_andZeroCost() {
+        BattleLobby ev = eventLobby();
+        when(lobbyRepository.findByStatusOrderByCreatedAtDesc(LobbyStatus.WAITING)).thenReturn(List.of(ev));
+        when(lobbyCaseRepository.findByLobbyIdInOrderByOrdinalAsc(any())).thenReturn(List.of());
+        when(caseDefinitionRepository.findAllById(any())).thenReturn(List.of(caseDef("classic_basic", 1150)));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(ev.getId()))
+                .thenReturn(List.of(slot(0, SlotType.EMPTY, null, false), slot(1, SlotType.EMPTY, null, false)));
+
+        List<LobbyResponse> out = service.listOpenLobbies(JOINER);
+
+        assertEquals(1, out.size());
+        assertTrue(out.get(0).isEventLobby());
+        assertEquals(BattleLobbyService.EVENT_TYPE_FREE, out.get(0).eventType());
+        assertEquals(0L, out.get(0).entryCost());
+    }
+
+    @Test
+    void joinEventLobby_doesNotDebitWallet_andFillsSlotFree() {
+        BattleLobby ev = eventLobby();
+        BattleLobbySlot empty0 = slot(0, SlotType.EMPTY, null, false);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(ev));
+        when(accountRepository.findById(JOINER)).thenReturn(Optional.of(account(JOINER, 1)));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY))
+                .thenReturn(List.of(empty0, slot(1, SlotType.EMPTY, null, false)));
+        when(lobbyCaseRepository.findByLobbyIdOrderByOrdinalAsc(LOBBY)).thenReturn(List.of());
+        when(caseDefinitionRepository.findAllById(any())).thenReturn(List.of(caseDef("classic_basic", 1150)));
+
+        service.joinLobby(JOINER, LOBBY, 0);
+
+        verify(walletService, never()).debit(any(), anyLong(), any(), any());
+        assertEquals(SlotType.REAL, empty0.getSlotType());
+        assertEquals(JOINER, empty0.getAccountId());
+        assertEquals(0L, empty0.getChargedVp());
+    }
+
+    @Test
+    void normalCreate_isNeverAnEventLobby() {
+        when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(100)));
+        when(accountRepository.findById(CREATOR)).thenReturn(Optional.of(account(CREATOR, 50)));
+        when(progressionService.isCategoryUnlocked(eq(50), any(CaseCategory.class))).thenReturn(true);
+        stubLobbySave();
+        when(walletService.debit(eq(CREATOR), eq(200L), any(), any())).thenReturn(new Wallet());
+
+        LobbyResponse res = service.createLobby(CREATOR, List.of(new CaseSelectionRequest(CASE_ID, 2)), 2);
+
+        assertFalse(res.isEventLobby());
+        assertNull(res.eventType());
+        assertEquals(200L, res.entryCost());
+    }
+
+    @Test
+    void eventWindowKey_isStableWithinWindow_andChangesAcrossWindows() {
+        Instant inWindow = Instant.ofEpochSecond(960);
+        Instant sameWindow = Instant.ofEpochSecond(1079);
+        Instant nextWindow = Instant.ofEpochSecond(1080);
+
+        assertEquals(
+                BattleLobbyService.currentEventWindowKey(inWindow),
+                BattleLobbyService.currentEventWindowKey(sameWindow));
+        assertNotEquals(
+                BattleLobbyService.currentEventWindowKey(inWindow),
+                BattleLobbyService.currentEventWindowKey(nextWindow));
     }
 }

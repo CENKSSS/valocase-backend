@@ -107,6 +107,24 @@ public class BattleLobbyService {
     /** A lobby may select at most this many distinct cases. */
     public static final int MAX_CASE_TYPES = 5;
 
+    /** Fixed, disabled system account that owns Free Lobby Events (see V71 migration). */
+    public static final UUID SYSTEM_EVENT_ACCOUNT_ID =
+            UUID.fromString("00000000-0000-0000-0000-000000000001");
+    /** {@code eventType} emitted for a Free Lobby Event so Unity can show a FREE card. */
+    public static final String EVENT_TYPE_FREE = "FREE_LOBBY";
+    /** Cadence of the Free Lobby Event; also the window length used for the dedup key. */
+    public static final Duration EVENT_INTERVAL = Duration.ofMinutes(2);
+    /** Participant slots of an event lobby (all start empty; real players fill them). */
+    public static final int EVENT_LOBBY_SLOTS = 2;
+
+    /** The 5 Basic cases (quantity 5 each) every Free Lobby Event opens. */
+    private static final List<CaseSelectionRequest> EVENT_CASE_SELECTIONS = List.of(
+            new CaseSelectionRequest("classic_basic", 5),
+            new CaseSelectionRequest("ghost_basic", 5),
+            new CaseSelectionRequest("bulldog_basic", 5),
+            new CaseSelectionRequest("vandal_basic", 5),
+            new CaseSelectionRequest("melee_basic", 5));
+
     private final CaseDefinitionRepository caseDefinitionRepository;
     private final CaseEntryRepository caseEntryRepository;
     private final SkinRepository skinRepository;
@@ -229,6 +247,80 @@ public class BattleLobbyService {
         }
 
         return mapLobby(lobby, slots, lobbyCases, caseById, accountId);
+    }
+
+    // --- Free Lobby Event (server-authoritative; never reachable from a client) -
+
+    /**
+     * Creates one FREE (entry cost 0) public event lobby for the current 2-minute
+     * window, if none exists yet. The lobby starts with only empty slots (no real
+     * host), is owned by the {@link #SYSTEM_EVENT_ACCOUNT_ID system account}, and
+     * is marked {@code is_event}. The {@code event_window_key} UNIQUE constraint is
+     * the database-level guard: a concurrent insert from another instance collides
+     * and the {@code DataIntegrityViolationException} propagates to the caller, so
+     * at most one event lobby is ever created per window. A late run or restart
+     * within the same window finds the existing key and creates nothing.
+     */
+    @Transactional
+    public java.util.Optional<UUID> createEventLobby() {
+        String windowKey = currentEventWindowKey(Instant.now());
+        if (lobbyRepository.existsByEventWindowKey(windowKey)) {
+            return java.util.Optional.empty();
+        }
+
+        int totalRounds = 0;
+        for (CaseSelectionRequest selection : EVENT_CASE_SELECTIONS) {
+            requireActiveCase(selection.caseId());
+            totalRounds += selection.quantity();
+        }
+        String primaryCaseId = EVENT_CASE_SELECTIONS.get(0).caseId();
+
+        BattleLobby lobby = new BattleLobby();
+        lobby.setCreatorAccountId(SYSTEM_EVENT_ACCOUNT_ID);
+        lobby.setCaseId(primaryCaseId);
+        lobby.setRounds(totalRounds);
+        lobby.setMaxSlots(EVENT_LOBBY_SLOTS);
+        lobby.setEntryCost(0L);
+        lobby.setStatus(LobbyStatus.WAITING);
+        lobby.setCreatedAt(Instant.now());
+        lobby.setEvent(true);
+        lobby.setEventWindowKey(windowKey);
+        lobby = lobbyRepository.saveAndFlush(lobby);
+        UUID lobbyId = lobby.getId();
+
+        List<BattleLobbyCase> lobbyCases = new ArrayList<>(EVENT_CASE_SELECTIONS.size());
+        for (int i = 0; i < EVENT_CASE_SELECTIONS.size(); i++) {
+            CaseSelectionRequest selection = EVENT_CASE_SELECTIONS.get(i);
+            BattleLobbyCase lobbyCase = new BattleLobbyCase();
+            lobbyCase.setLobbyId(lobbyId);
+            lobbyCase.setOrdinal(i);
+            lobbyCase.setCaseId(selection.caseId());
+            lobbyCase.setQuantity(selection.quantity());
+            lobbyCases.add(lobbyCase);
+        }
+        lobbyCaseRepository.saveAll(lobbyCases);
+
+        List<BattleLobbySlot> slots = new ArrayList<>(EVENT_LOBBY_SLOTS);
+        for (int i = 0; i < EVENT_LOBBY_SLOTS; i++) {
+            BattleLobbySlot empty = new BattleLobbySlot();
+            empty.setLobbyId(lobbyId);
+            empty.setSlotIndex(i);
+            empty.setSlotType(SlotType.EMPTY);
+            empty.setCreator(false);
+            empty.setChargedVp(0L);
+            slots.add(empty);
+        }
+        slotRepository.saveAll(slots);
+
+        log.info("FREE_LOBBY_EVENT created lobbyId={} window={}", lobbyId, windowKey);
+        return java.util.Optional.of(lobbyId);
+    }
+
+    /** Stable dedup key for the 2-minute window {@code now} falls in. */
+    static String currentEventWindowKey(Instant now) {
+        long windowSeconds = EVENT_INTERVAL.getSeconds();
+        long windowStart = (now.getEpochSecond() / windowSeconds) * windowSeconds;
+        return "free-event-" + windowStart;
     }
 
     // --- List ------------------------------------------------------------------
@@ -825,7 +917,9 @@ public class BattleLobbyService {
                 lobby.getWinnerSlotIndex(),
                 winnerDisplayName,
                 winnerAvatarId,
-                winnerRewarded
+                winnerRewarded,
+                lobby.isEvent(),
+                lobby.isEvent() ? EVENT_TYPE_FREE : null
         );
     }
 

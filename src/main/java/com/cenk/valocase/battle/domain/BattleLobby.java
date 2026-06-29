@@ -84,6 +84,14 @@ public class BattleLobby {
     @Column(name = "result_battle_id")
     private UUID resultBattleId;
 
+    /** True for a system-created Free Lobby Event; clients can never set this. */
+    @Column(name = "is_event", nullable = false, updatable = false)
+    private boolean event;
+
+    /** The 2-minute window an event lobby belongs to; UNIQUE so only one exists per window. */
+    @Column(name = "event_window_key", length = 60, updatable = false)
+    private String eventWindowKey;
+
     @Version
     @Column(name = "version", nullable = false)
     private long version;

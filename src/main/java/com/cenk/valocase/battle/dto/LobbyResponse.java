@@ -14,6 +14,11 @@ import java.util.List;
  * Bot becomes allowed so every client agrees. {@code winnerRewarded} (set once
  * COMPLETED) is false when the winning slot was a bot or a disconnected real
  * player, in which case no inventory reward was granted.
+ *
+ * <p>{@code isEventLobby} marks a system-created Free Lobby Event; for those
+ * {@code entryCost} is always 0 and {@code eventType} is set (e.g. FREE_LOBBY) so
+ * Unity can show a FREE card. Both fields are appended, so existing clients are
+ * unaffected.
  */
 public record LobbyResponse(
         String battleId,
@@ -34,6 +39,8 @@ public record LobbyResponse(
         Integer winnerSlotIndex,
         String winnerDisplayName,
         String winnerAvatarId,
-        Boolean winnerRewarded
+        Boolean winnerRewarded,
+        boolean isEventLobby,
+        String eventType
 ) {
 }
