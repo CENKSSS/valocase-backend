@@ -928,7 +928,7 @@ class BattleLobbyServiceTest {
         lobby.setId(LOBBY);
         lobby.setCreatorAccountId(BattleLobbyService.SYSTEM_EVENT_ACCOUNT_ID);
         lobby.setCaseId("classic_basic");
-        lobby.setRounds(25);
+        lobby.setRounds(15);
         lobby.setMaxSlots(BattleLobbyService.EVENT_LOBBY_SLOTS);
         lobby.setEntryCost(0L);
         lobby.setStatus(LobbyStatus.WAITING);
@@ -956,7 +956,7 @@ class BattleLobbyServiceTest {
                 l.isEvent()
                 && l.getEntryCost() == 0L
                 && BattleLobbyService.SYSTEM_EVENT_ACCOUNT_ID.equals(l.getCreatorAccountId())
-                && l.getRounds() == 25
+                && l.getRounds() == 15
                 && l.getEventWindowKey() != null));
         verify(walletService, never()).debit(any(), anyLong(), any(), any());
 
@@ -1035,8 +1035,8 @@ class BattleLobbyServiceTest {
     @Test
     void eventWindowKey_isStableWithinWindow_andChangesAcrossWindows() {
         Instant inWindow = Instant.ofEpochSecond(18000);
-        Instant sameWindow = Instant.ofEpochSecond(35999);
-        Instant nextWindow = Instant.ofEpochSecond(36000);
+        Instant sameWindow = Instant.ofEpochSecond(18119);
+        Instant nextWindow = Instant.ofEpochSecond(18120);
 
         assertEquals(
                 BattleLobbyService.currentEventWindowKey(inWindow),

@@ -113,17 +113,17 @@ public class BattleLobbyService {
     /** {@code eventType} emitted for a Free Lobby Event so Unity can show a FREE card. */
     public static final String EVENT_TYPE_FREE = "FREE_LOBBY";
     /** Cadence of the Free Lobby Event; also the window length used for the dedup key. */
-    public static final Duration EVENT_INTERVAL = Duration.ofHours(5);
+    public static final Duration EVENT_INTERVAL = Duration.ofMinutes(2);
     /** Participant slots of an event lobby (all start empty; real players fill them). */
     public static final int EVENT_LOBBY_SLOTS = 2;
 
-    /** The 5 Basic cases (quantity 5 each) every Free Lobby Event opens. */
+    /** The 5 Basic cases (quantity 3 each) every Free Lobby Event opens. */
     private static final List<CaseSelectionRequest> EVENT_CASE_SELECTIONS = List.of(
-            new CaseSelectionRequest("classic_basic", 5),
-            new CaseSelectionRequest("ghost_basic", 5),
-            new CaseSelectionRequest("bulldog_basic", 5),
-            new CaseSelectionRequest("vandal_basic", 5),
-            new CaseSelectionRequest("melee_basic", 5));
+            new CaseSelectionRequest("classic_basic", 3),
+            new CaseSelectionRequest("ghost_basic", 3),
+            new CaseSelectionRequest("bulldog_basic", 3),
+            new CaseSelectionRequest("vandal_basic", 3),
+            new CaseSelectionRequest("melee_basic", 3));
 
     private final CaseDefinitionRepository caseDefinitionRepository;
     private final CaseEntryRepository caseEntryRepository;
@@ -316,7 +316,7 @@ public class BattleLobbyService {
         return java.util.Optional.of(lobbyId);
     }
 
-    /** Stable dedup key for the 5-hour window {@code now} falls in. */
+    /** Stable dedup key for the 2-minute window {@code now} falls in. */
     static String currentEventWindowKey(Instant now) {
         long windowSeconds = EVENT_INTERVAL.getSeconds();
         long windowStart = (now.getEpochSecond() / windowSeconds) * windowSeconds;
