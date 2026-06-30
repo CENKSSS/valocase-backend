@@ -39,6 +39,6 @@ public interface BattleLobbyRepository extends JpaRepository<BattleLobby, UUID> 
     /** Full lobbies whose start delay has elapsed but were never resolved by a poll. */
     List<BattleLobby> findByStatusAndReadyAtLessThanEqual(LobbyStatus status, Instant readyAtMax);
 
-    /** True once an event lobby for this 2-minute window exists (any status). */
+    /** True once an event lobby for this 5-hour window exists (any status). */
     boolean existsByEventWindowKey(String eventWindowKey);
 }

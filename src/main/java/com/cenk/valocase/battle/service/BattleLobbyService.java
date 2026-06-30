@@ -113,7 +113,7 @@ public class BattleLobbyService {
     /** {@code eventType} emitted for a Free Lobby Event so Unity can show a FREE card. */
     public static final String EVENT_TYPE_FREE = "FREE_LOBBY";
     /** Cadence of the Free Lobby Event; also the window length used for the dedup key. */
-    public static final Duration EVENT_INTERVAL = Duration.ofMinutes(2);
+    public static final Duration EVENT_INTERVAL = Duration.ofHours(5);
     /** Participant slots of an event lobby (all start empty; real players fill them). */
     public static final int EVENT_LOBBY_SLOTS = 2;
 
@@ -252,7 +252,7 @@ public class BattleLobbyService {
     // --- Free Lobby Event (server-authoritative; never reachable from a client) -
 
     /**
-     * Creates one FREE (entry cost 0) public event lobby for the current 2-minute
+     * Creates one FREE (entry cost 0) public event lobby for the current 5-hour
      * window, if none exists yet. The lobby starts with only empty slots (no real
      * host), is owned by the {@link #SYSTEM_EVENT_ACCOUNT_ID system account}, and
      * is marked {@code is_event}. The {@code event_window_key} UNIQUE constraint is
@@ -316,7 +316,7 @@ public class BattleLobbyService {
         return java.util.Optional.of(lobbyId);
     }
 
-    /** Stable dedup key for the 2-minute window {@code now} falls in. */
+    /** Stable dedup key for the 5-hour window {@code now} falls in. */
     static String currentEventWindowKey(Instant now) {
         long windowSeconds = EVENT_INTERVAL.getSeconds();
         long windowStart = (now.getEpochSecond() / windowSeconds) * windowSeconds;
