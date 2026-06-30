@@ -1035,8 +1035,8 @@ class BattleLobbyServiceTest {
     @Test
     void eventWindowKey_isStableWithinWindow_andChangesAcrossWindows() {
         Instant inWindow = Instant.ofEpochSecond(18000);
-        Instant sameWindow = Instant.ofEpochSecond(18119);
-        Instant nextWindow = Instant.ofEpochSecond(18120);
+        Instant sameWindow = Instant.ofEpochSecond(28799);
+        Instant nextWindow = Instant.ofEpochSecond(28800);
 
         assertEquals(
                 BattleLobbyService.currentEventWindowKey(inWindow),
