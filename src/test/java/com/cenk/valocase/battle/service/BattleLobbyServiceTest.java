@@ -545,8 +545,12 @@ class BattleLobbyServiceTest {
         when(lobbyRepository.findByStatusOrderByCreatedAtDesc(LobbyStatus.WAITING))
                 .thenReturn(List.of(expired, fresh));
         when(caseDefinitionRepository.findAllById(any())).thenReturn(List.of(caseDef(100)));
-        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(fresh.getId()))
-                .thenReturn(List.of(slot(0, SlotType.REAL, CREATOR, true), slot(1, SlotType.EMPTY, null, false)));
+        BattleLobbySlot freshSlot0 = slot(0, SlotType.REAL, CREATOR, true);
+        freshSlot0.setLobbyId(fresh.getId());
+        BattleLobbySlot freshSlot1 = slot(1, SlotType.EMPTY, null, false);
+        freshSlot1.setLobbyId(fresh.getId());
+        when(slotRepository.findByLobbyIdInOrderBySlotIndexAsc(any()))
+                .thenReturn(List.of(freshSlot0, freshSlot1));
 
         List<LobbyResponse> out = service.listOpenLobbies(CREATOR);
 
@@ -987,7 +991,7 @@ class BattleLobbyServiceTest {
         when(lobbyRepository.findByStatusOrderByCreatedAtDesc(LobbyStatus.WAITING)).thenReturn(List.of(ev));
         when(lobbyCaseRepository.findByLobbyIdInOrderByOrdinalAsc(any())).thenReturn(List.of());
         when(caseDefinitionRepository.findAllById(any())).thenReturn(List.of(caseDef("classic_basic", 1150)));
-        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(ev.getId()))
+        when(slotRepository.findByLobbyIdInOrderBySlotIndexAsc(any()))
                 .thenReturn(List.of(slot(0, SlotType.EMPTY, null, false), slot(1, SlotType.EMPTY, null, false)));
 
         List<LobbyResponse> out = service.listOpenLobbies(JOINER);
@@ -1034,9 +1038,9 @@ class BattleLobbyServiceTest {
 
     @Test
     void eventWindowKey_isStableWithinWindow_andChangesAcrossWindows() {
-        Instant inWindow = Instant.ofEpochSecond(18000);
-        Instant sameWindow = Instant.ofEpochSecond(28799);
-        Instant nextWindow = Instant.ofEpochSecond(28800);
+        Instant inWindow = Instant.ofEpochSecond(100_000);
+        Instant sameWindow = Instant.ofEpochSecond(172_799);
+        Instant nextWindow = Instant.ofEpochSecond(172_800);
 
         assertEquals(
                 BattleLobbyService.currentEventWindowKey(inWindow),

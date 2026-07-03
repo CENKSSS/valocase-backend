@@ -8,11 +8,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Creates one server-authoritative Free Lobby Event every 8 hours by delegating
+ * Creates one server-authoritative Free Lobby Event every 2 days by delegating
  * to the locked, window-keyed {@link BattleLobbyService#createEventLobby()}.
  *
- * <p>The cron fires on each 8-hour boundary; the event lobby's {@code event_window_key}
- * is derived from the wall clock (floored to the 8-hour window), so a late run
+ * <p>The cron fires on each 2-day boundary; the event lobby's {@code event_window_key}
+ * is derived from the wall clock (floored to the 2-day window), so a late run
  * or a restart within the same window creates nothing. When multiple instances run
  * the scheduler at once, the database UNIQUE constraint lets exactly one insert
  * win and the loser's {@link DataIntegrityViolationException} is swallowed here.
@@ -24,7 +24,7 @@ public class FreeLobbyEventScheduler {
 
     private final BattleLobbyService lobbyService;
 
-    @Scheduled(cron = "${valocase.lobby.event-cron:0 0 */8 * * *}", zone = "UTC")
+    @Scheduled(cron = "${valocase.lobby.event-cron:0 0 0 */2 * *}", zone = "UTC")
     public void run() {
         try {
             lobbyService.createEventLobby();

@@ -113,7 +113,7 @@ public class BattleLobbyService {
     /** {@code eventType} emitted for a Free Lobby Event so Unity can show a FREE card. */
     public static final String EVENT_TYPE_FREE = "FREE_LOBBY";
     /** Cadence of the Free Lobby Event; also the window length used for the dedup key. */
-    public static final Duration EVENT_INTERVAL = Duration.ofHours(8);
+    public static final Duration EVENT_INTERVAL = Duration.ofDays(2);
     /** Participant slots of an event lobby (all start empty; real players fill them). */
     public static final int EVENT_LOBBY_SLOTS = 2;
 
@@ -252,7 +252,7 @@ public class BattleLobbyService {
     // --- Free Lobby Event (server-authoritative; never reachable from a client) -
 
     /**
-     * Creates one FREE (entry cost 0) public event lobby for the current 8-hour
+     * Creates one FREE (entry cost 0) public event lobby for the current 2-day
      * window, if none exists yet. The lobby starts with only empty slots (no real
      * host), is owned by the {@link #SYSTEM_EVENT_ACCOUNT_ID system account}, and
      * is marked {@code is_event}. The {@code event_window_key} UNIQUE constraint is
@@ -316,7 +316,7 @@ public class BattleLobbyService {
         return java.util.Optional.of(lobbyId);
     }
 
-    /** Stable dedup key for the 8-hour window {@code now} falls in. */
+    /** Stable dedup key for the 2-day window {@code now} falls in. */
     static String currentEventWindowKey(Instant now) {
         long windowSeconds = EVENT_INTERVAL.getSeconds();
         long windowStart = (now.getEpochSecond() / windowSeconds) * windowSeconds;
@@ -328,15 +328,17 @@ public class BattleLobbyService {
     @Transactional(readOnly = true)
     public List<LobbyResponse> listOpenLobbies(UUID viewerAccountId) {
         List<BattleLobby> lobbies = lobbyRepository.findByStatusOrderByCreatedAtDesc(LobbyStatus.WAITING);
-        log.info("LOBBY_DEBUG list: viewer={} fetchedWaiting={} ids={}",
-                viewerAccountId, lobbies.size(), lobbies.stream().map(BattleLobby::getId).toList());
         if (lobbies.isEmpty()) {
             return List.of();
         }
+        List<UUID> lobbyIds = lobbies.stream().map(BattleLobby::getId).toList();
         Instant expiryCutoff = Instant.now().minus(LOBBY_TIMEOUT);
         Map<UUID, List<BattleLobbyCase>> casesByLobby = lobbyCaseRepository
-                .findByLobbyIdInOrderByOrdinalAsc(lobbies.stream().map(BattleLobby::getId).toList())
+                .findByLobbyIdInOrderByOrdinalAsc(lobbyIds)
                 .stream().collect(Collectors.groupingBy(BattleLobbyCase::getLobbyId));
+        Map<UUID, List<BattleLobbySlot>> slotsByLobby = slotRepository
+                .findByLobbyIdInOrderBySlotIndexAsc(lobbyIds)
+                .stream().collect(Collectors.groupingBy(BattleLobbySlot::getLobbyId));
 
         List<String> caseIds = new ArrayList<>();
         lobbies.forEach(l -> caseIds.add(l.getCaseId()));
@@ -348,15 +350,12 @@ public class BattleLobbyService {
         List<LobbyResponse> out = new ArrayList<>(lobbies.size());
         for (BattleLobby lobby : lobbies) {
             if (lobby.getCreatedAt().isBefore(expiryCutoff)) {
-                log.info("LOBBY_DEBUG list: skipping expired lobbyId={} createdAt={}",
-                        lobby.getId(), lobby.getCreatedAt());
                 continue;
             }
-            List<BattleLobbySlot> slots = slotRepository.findByLobbyIdOrderBySlotIndexAsc(lobby.getId());
+            List<BattleLobbySlot> slots = slotsByLobby.getOrDefault(lobby.getId(), List.of());
             List<BattleLobbyCase> lobbyCases = casesByLobby.getOrDefault(lobby.getId(), List.of());
             out.add(mapLobby(lobby, slots, lobbyCases, caseById, viewerAccountId));
         }
-        log.info("LOBBY_DEBUG list: viewer={} returned={}", viewerAccountId, out.size());
         return out;
     }
 
@@ -531,8 +530,7 @@ public class BattleLobbyService {
         if (lobby.getCreatedAt().isAfter(Instant.now().minus(LOBBY_TIMEOUT))) {
             return;
         }
-        log.info("LOBBY_DEBUG scheduler cancel: lobbyId={} status={} createdAt={}",
-                lobbyId, lobby.getStatus(), lobby.getCreatedAt());
+        log.debug("Cancelling stale lobby {} createdAt={}", lobbyId, lobby.getCreatedAt());
         List<BattleLobbySlot> slots = slotRepository.findByLobbyIdOrderBySlotIndexAsc(lobbyId);
         refundRealOccupants(lobby, slots);
     }
