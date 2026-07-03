@@ -1,0 +1,12 @@
+.git
+.gitattributes
+.gitignore
+.idea
+.agentic-qe
+.claude
+.mcp.json
+docs
+tools
+target
+mvnw.cmd
+*.md
