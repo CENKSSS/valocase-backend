@@ -308,7 +308,7 @@ class EarnVpServiceTest {
         when(earnVpClaimRepository.findByAccountIdAndClientSessionId(ACCOUNT, SESSION))
                 .thenReturn(Optional.of(existingClaim(10, 17L)));
         when(walletService.getWalletForAccount(ACCOUNT))
-                .thenReturn(new WalletResponse(ACCOUNT.toString(), 3520L, Instant.now(), null));
+                .thenReturn(new WalletResponse(ACCOUNT.toString(), 3520L, 0L, Instant.now(), null));
 
         EarnVpClaimResponse result = service.claim(ACCOUNT, 10, SESSION, offsets(0, 100, 200));
 

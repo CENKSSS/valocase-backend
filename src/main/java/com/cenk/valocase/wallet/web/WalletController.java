@@ -34,6 +34,7 @@ public class WalletController {
         WalletResponse wallet = walletService.getWalletForAccount(account.getId());
         ProgressionView progression = progressionService.buildView(account);
         return new WalletResponse(
-                wallet.accountId(), wallet.vpBalance(), wallet.updatedAt(), progression);
+                wallet.accountId(), wallet.vpBalance(), wallet.diamondBalance(),
+                wallet.updatedAt(), progression);
     }
 }

@@ -10,6 +10,7 @@ public record GuestRegisterResponse(
         String displayName,
         String avatarId,
         String status,
-        long vpBalance
+        long vpBalance,
+        long diamondBalance
 ) {
 }

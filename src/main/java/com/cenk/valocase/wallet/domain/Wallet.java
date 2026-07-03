@@ -36,6 +36,9 @@ public class Wallet {
     @Column(name = "vp_balance", nullable = false)
     private long vpBalance;
 
+    @Column(name = "diamond_balance", nullable = false)
+    private long diamondBalance;
+
     @Version
     @Column(name = "version", nullable = false)
     private long version;

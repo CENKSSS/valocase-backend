@@ -96,7 +96,7 @@ class CatalogServiceTest {
 
     private void stubWallet(long balance) {
         when(walletService.getWalletForAccount(ACCOUNT))
-                .thenReturn(new WalletResponse(ACCOUNT.toString(), balance, Instant.now(), null));
+                .thenReturn(new WalletResponse(ACCOUNT.toString(), balance, 0L, Instant.now(), null));
     }
 
     @Test

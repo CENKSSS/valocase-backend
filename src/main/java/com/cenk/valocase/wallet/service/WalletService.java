@@ -51,7 +51,8 @@ public class WalletService {
     @Transactional(readOnly = true)
     public WalletResponse getWalletForAccount(UUID accountId) {
         Wallet wallet = requireWallet(accountId);
-        return new WalletResponse(accountId.toString(), wallet.getVpBalance(), wallet.getUpdatedAt(), null);
+        return new WalletResponse(accountId.toString(), wallet.getVpBalance(),
+                wallet.getDiamondBalance(), wallet.getUpdatedAt(), null);
     }
 
     /** Adds VP to an account's wallet. {@code amount} must be positive. */
@@ -74,6 +75,32 @@ public class WalletService {
             throw new InsufficientFundsException(wallet.getVpBalance(), amount);
         }
         return applyDelta(wallet, -amount, reason, referenceId);
+    }
+
+    /** Adds diamonds to an account's wallet. {@code amount} must be positive. */
+    @Transactional
+    public Wallet creditDiamonds(UUID accountId, long amount) {
+        requirePositive(amount);
+        Wallet wallet = requireWallet(accountId);
+        wallet.setDiamondBalance(wallet.getDiamondBalance() + amount);
+        wallet.setUpdatedAt(Instant.now());
+        return walletRepository.save(wallet);
+    }
+
+    /**
+     * Removes diamonds from an account's wallet. {@code amount} must be positive
+     * and must not exceed the current diamond balance.
+     */
+    @Transactional
+    public Wallet debitDiamonds(UUID accountId, long amount) {
+        requirePositive(amount);
+        Wallet wallet = requireWallet(accountId);
+        if (wallet.getDiamondBalance() < amount) {
+            throw new InsufficientDiamondsException(wallet.getDiamondBalance(), amount);
+        }
+        wallet.setDiamondBalance(wallet.getDiamondBalance() - amount);
+        wallet.setUpdatedAt(Instant.now());
+        return walletRepository.save(wallet);
     }
 
     private Wallet applyDelta(Wallet wallet, long delta, String reason, UUID referenceId) {

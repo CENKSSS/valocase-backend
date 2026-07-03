@@ -239,7 +239,7 @@ class AdRewardServiceTest {
         when(adRewardClaimRepository.findFirstByAccountIdAndRewardTypeOrderByCreatedAtDesc(ACCOUNT, MARKET))
                 .thenReturn(Optional.of(marketClaimAt(NOW.minusSeconds(60))));
         when(walletService.getWalletForAccount(ACCOUNT))
-                .thenReturn(new WalletResponse(ACCOUNT.toString(), 20000L, NOW, null));
+                .thenReturn(new WalletResponse(ACCOUNT.toString(), 20000L, 0L, NOW, null));
 
         AdRewardClaimResponse r = service.claim(ACCOUNT, MARKET, marketReq("ad-m5"));
 
@@ -280,7 +280,7 @@ class AdRewardServiceTest {
                 ACCOUNT, MARKET, "ad-m1")).thenReturn(Optional.of(prior));
         when(adRewardClaimRepository.countByAccountIdAndRewardType(ACCOUNT, MARKET)).thenReturn(1L);
         when(walletService.getWalletForAccount(ACCOUNT))
-                .thenReturn(new WalletResponse(ACCOUNT.toString(), 12500L, NOW, null));
+                .thenReturn(new WalletResponse(ACCOUNT.toString(), 12500L, 0L, NOW, null));
 
         AdRewardClaimResponse r = service.claim(ACCOUNT, MARKET, marketReq("ad-m1"));
 
@@ -327,6 +327,50 @@ class AdRewardServiceTest {
         assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
         verify(adRewardClaimRepository, never()).saveAndFlush(any());
     }
+
+    @Test
+    void diamondClaim_grantsExactlyOneDiamond() {
+        when(adRewardClaimRepository.findByAccountIdAndRewardTypeAndAdToken(ACCOUNT, DIAMOND, "ad-d1"))
+                .thenReturn(Optional.empty());
+        Wallet wallet = new Wallet();
+        wallet.setDiamondBalance(1L);
+        when(walletService.creditDiamonds(ACCOUNT, 1L)).thenReturn(wallet);
+
+        AdRewardClaimResponse r = service.claim(ACCOUNT, DIAMOND,
+                new AdRewardClaimRequest("DIAMOND_1", "ad-d1", null, null, null, null));
+
+        assertEquals("OK", r.status());
+        assertEquals(1L, r.grantedDiamonds());
+        assertEquals(1L, r.newDiamondBalance());
+        ArgumentCaptor<AdRewardClaim> captor = ArgumentCaptor.forClass(AdRewardClaim.class);
+        verify(adRewardClaimRepository).saveAndFlush(captor.capture());
+        assertEquals(AdRewardType.DIAMOND_1, captor.getValue().getRewardType());
+        assertTrue(captor.getValue().isConsumed());
+        verify(walletService).creditDiamonds(ACCOUNT, 1L);
+    }
+
+    @Test
+    void diamondClaim_duplicateToken_doesNotCreditAgain() {
+        AdRewardClaim prior = new AdRewardClaim();
+        prior.setAccountId(ACCOUNT);
+        prior.setRewardType(DIAMOND);
+        prior.setAdToken("ad-d1");
+        when(adRewardClaimRepository.findByAccountIdAndRewardTypeAndAdToken(ACCOUNT, DIAMOND, "ad-d1"))
+                .thenReturn(Optional.of(prior));
+        when(walletService.getWalletForAccount(ACCOUNT))
+                .thenReturn(new WalletResponse(ACCOUNT.toString(), 0L, 5L, NOW, null));
+
+        AdRewardClaimResponse r = service.claim(ACCOUNT, DIAMOND,
+                new AdRewardClaimRequest("DIAMOND_1", "ad-d1", null, null, null, null));
+
+        assertEquals("DUPLICATE", r.status());
+        assertEquals(0L, r.grantedDiamonds());
+        assertEquals(5L, r.newDiamondBalance());
+        verify(walletService, never()).creditDiamonds(any(), anyLong());
+        verify(adRewardClaimRepository, never()).saveAndFlush(any());
+    }
+
+    private static final AdRewardType DIAMOND = AdRewardType.DIAMOND_1;
 
     private static InventoryItem inventoryItem(UUID id) {
         InventoryItem i = new InventoryItem();

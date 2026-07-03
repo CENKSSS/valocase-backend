@@ -12,6 +12,7 @@ import com.cenk.valocase.progression.dto.ProgressionView;
 public record WalletResponse(
         String accountId,
         long vpBalance,
+        long diamondBalance,
         Instant updatedAt,
         ProgressionView progression
 ) {

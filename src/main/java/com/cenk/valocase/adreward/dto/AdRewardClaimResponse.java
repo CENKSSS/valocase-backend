@@ -8,6 +8,8 @@ package com.cenk.valocase.adreward.dto;
  * that credit the wallet directly (MARKET_VP_2500); they stay 0 for EARN_VP_2X
  * (which only arms a session bonus) and UPGRADE_PLUS_5. The {@code market*} fields
  * describe the Market placement's repeat-limit cycle and are 0/false otherwise.
+ * {@code grantedDiamonds} and {@code newDiamondBalance} are only meaningful for
+ * DIAMOND_1 and stay 0 for the other placements.
  */
 public record AdRewardClaimResponse(
         String rewardType,
@@ -21,6 +23,8 @@ public record AdRewardClaimResponse(
         long newVpBalance,
         long marketRemainingClaims,
         boolean marketCooldownActive,
-        long marketCooldownRemainingSeconds
+        long marketCooldownRemainingSeconds,
+        long grantedDiamonds,
+        long newDiamondBalance
 ) {
 }

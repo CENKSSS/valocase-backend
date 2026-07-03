@@ -7,6 +7,8 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -49,6 +51,8 @@ import lombok.RequiredArgsConstructor;
 @Service
 @RequiredArgsConstructor
 public class CaseOpeningService {
+
+    private static final Logger log = LoggerFactory.getLogger(CaseOpeningService.class);
 
     /** Wallet transaction reason for a case purchase. */
     public static final String REASON_CASE_OPEN = "CASE_OPEN";
@@ -104,6 +108,20 @@ public class CaseOpeningService {
                     return skin != null && skin.isActive();
                 })
                 .toList();
+
+        // Guard: a drop entry pointing outside the active catalog is never rolled; log the drift.
+        if (candidates.size() < entries.size()) {
+            List<String> excluded = entries.stream()
+                    .map(CaseEntry::getSkinId)
+                    .filter(id -> {
+                        Skin skin = skinsById.get(id);
+                        return skin == null || !skin.isActive();
+                    })
+                    .distinct()
+                    .toList();
+            log.warn("Case '{}' has drop entries pointing at missing/inactive skins; "
+                    + "excluded from roll (never returned): {}", caseId, excluded);
+        }
 
         if (candidates.isEmpty()) {
             throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR,

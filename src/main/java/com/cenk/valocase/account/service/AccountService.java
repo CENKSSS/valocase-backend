@@ -71,7 +71,8 @@ public class AccountService {
                 account.getDisplayName(),
                 account.getAvatarId(),
                 account.getStatus().name(),
-                wallet.getVpBalance()
+                wallet.getVpBalance(),
+                wallet.getDiamondBalance()
         );
     }
 

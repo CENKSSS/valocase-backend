@@ -217,7 +217,7 @@ class CaseOpeningServiceTest {
             return o;
         });
         when(walletService.getWalletForAccount(ACCOUNT_ID))
-                .thenReturn(new com.cenk.valocase.wallet.dto.WalletResponse(ACCOUNT_ID.toString(), 10000L, null, null));
+                .thenReturn(new com.cenk.valocase.wallet.dto.WalletResponse(ACCOUNT_ID.toString(), 10000L, 0L, null, null));
         InventoryItem item = new InventoryItem();
         item.setId(UUID.randomUUID());
         when(inventoryService.addItem(eq(ACCOUNT_ID), eq(skinId), eq(InventoryService.SOURCE_CASE_OPENING), eq(openingId)))

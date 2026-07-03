@@ -33,6 +33,10 @@ def sql_bool(value):
     return "TRUE" if value else "FALSE"
 
 
+def sql_id_list(skins, indent="    "):
+    return ",\n".join(indent + sql_str(s["skinId"]) for s in skins)
+
+
 def load_array(path, key):
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     if isinstance(data, list):
@@ -154,6 +158,14 @@ def build_sql(skins, cases, version, cases_only=False):
         add("    image_ref    = EXCLUDED.image_ref,")
         add("    active       = EXCLUDED.active;")
         add("")
+        add("-- Retire every skin not in this catalog. Deactivate (never delete) so")
+        add("-- existing inventory and case-opening history still resolve by id, but a")
+        add("-- retired skin can never be rolled again (case opening only considers")
+        add("-- active skins). This makes the active skin catalog match Unity exactly.")
+        add("UPDATE skins SET active = FALSE WHERE id NOT IN (")
+        add(sql_id_list(skins))
+        add(");")
+        add("")
     add(f"-- Cases ({len(cases)}). Upsert by primary key id.")
     add("INSERT INTO case_definitions (id, display_name, price_vp, image_ref, active) VALUES")
     add(",\n".join(
@@ -188,6 +200,15 @@ def build_sql(skins, cases, version, cases_only=False):
         f"    (gen_random_uuid(), {sql_str(cid)}, {sql_str(pid)}, {weight})"
         for cid, pid, weight in deduped) + ";")
     add("")
+
+    if not cases_only:
+        add("-- Safety net: drop every case entry (including on legacy/orphan cases not")
+        add("-- in this sync) that points outside this catalog, so no active case can")
+        add("-- roll a skinId Unity does not contain.")
+        add("DELETE FROM case_entries WHERE skin_id NOT IN (")
+        add(sql_id_list(skins))
+        add(");")
+        add("")
 
     weight_rows = []
     weight_seen = set()
