@@ -43,7 +43,7 @@ public class EarnVpService {
 
     public static final String REASON_EARN_VP = "EARN_VP";
 
-    static final BigDecimal BASE_REWARD = new BigDecimal("1.6");
+    static final BigDecimal BASE_REWARD = new BigDecimal("3.4");
     static final BigDecimal MULTIPLIER_START = BigDecimal.ONE;
     static final BigDecimal MULTIPLIER_STEP = new BigDecimal("0.02");
     static final BigDecimal MULTIPLIER_MAX = new BigDecimal("3.0");

@@ -123,37 +123,37 @@ class EarnVpServiceTest {
     // ---- aggregate fallback (no tapOffsetsMs) -----------------------------
 
     @Test
-    void oneAcceptedTap_grants1Vp() {
+    void oneAcceptedTap_grants3Vp() {
         stubSession(1_000L);
-        stubFreshClaim(10001L);
+        stubFreshClaim(10003L);
 
         EarnVpClaimResponse result = service.claim(ACCOUNT, 1, SESSION, null);
 
         assertEquals(1, result.acceptedTapCount());
-        assertEquals(1L, result.vpGranted());
+        assertEquals(3L, result.vpGranted());
         assertEquals("OK", result.message());
     }
 
     @Test
-    void tenAcceptedTaps_grants17Vp() {
+    void tenAcceptedTaps_grants37Vp() {
         stubSession(2_000L);
-        stubFreshClaim(10017L);
+        stubFreshClaim(10037L);
 
         EarnVpClaimResponse result = service.claim(ACCOUNT, 10, SESSION, null);
 
         assertEquals(10, result.acceptedTapCount());
-        assertEquals(17L, result.vpGranted());
+        assertEquals(37L, result.vpGranted());
     }
 
     @Test
-    void hundredAcceptedTaps_grants318Vp() {
+    void hundredAcceptedTaps_grants676Vp() {
         stubSession(10_000L);
-        stubFreshClaim(10318L);
+        stubFreshClaim(10676L);
 
         EarnVpClaimResponse result = service.claim(ACCOUNT, 100, SESSION, null);
 
         assertEquals(100, result.acceptedTapCount());
-        assertEquals(318L, result.vpGranted());
+        assertEquals(676L, result.vpGranted());
     }
 
     // ---- timed (tapOffsetsMs) ---------------------------------------------
@@ -170,7 +170,7 @@ class EarnVpServiceTest {
         EarnVpClaimResponse result = service.claim(ACCOUNT, 20, SESSION, offs);
 
         assertEquals(20, result.acceptedTapCount());
-        assertEquals(36L, result.vpGranted());
+        assertEquals(77L, result.vpGranted());
     }
 
     @Test
@@ -181,7 +181,7 @@ class EarnVpServiceTest {
         EarnVpClaimResponse result = service.claim(ACCOUNT, 37, SESSION, offsets(0, 300, 1200, 1500, 9000));
 
         assertEquals(5, result.acceptedTapCount());
-        assertEquals(8L, result.vpGranted());
+        assertEquals(17L, result.vpGranted());
     }
 
     @Test
@@ -196,7 +196,7 @@ class EarnVpServiceTest {
         EarnVpClaimResponse result = service.claim(ACCOUNT, 1_000_000, SESSION, offs);
 
         assertEquals(2400, result.acceptedTapCount());
-        assertEquals(11286L, result.vpGranted());
+        assertEquals(23984L, result.vpGranted());
     }
 
     // ---- server-authoritative timing & caps -------------------------------
@@ -230,7 +230,7 @@ class EarnVpServiceTest {
         EarnVpClaimResponse result = service.claim(ACCOUNT, 1_000_000, SESSION, null);
 
         assertEquals(2400, result.acceptedTapCount());
-        assertEquals(11358L, result.vpGranted());
+        assertEquals(24136L, result.vpGranted());
     }
 
     @Test
@@ -241,29 +241,29 @@ class EarnVpServiceTest {
         EarnVpClaimResponse result = service.claim(ACCOUNT, 1_000_000, SESSION, null);
 
         assertEquals(85, result.acceptedTapCount());
-        assertEquals(250L, result.vpGranted());
+        assertEquals(531L, result.vpGranted());
     }
 
     @Test
     void successfulClaim_creditsWalletExactlyOnce() {
         stubSession(2_000L);
-        stubFreshClaim(10017L);
+        stubFreshClaim(10037L);
 
         service.claim(ACCOUNT, 10, SESSION, null);
 
-        verify(walletService, times(1)).credit(eq(ACCOUNT), eq(17L), eq(EarnVpService.REASON_EARN_VP), any());
+        verify(walletService, times(1)).credit(eq(ACCOUNT), eq(37L), eq(EarnVpService.REASON_EARN_VP), any());
     }
 
     @Test
     void active2xWindow_doublesEarnVpClaim() {
         EarnVpSession session = stubSession(2_000L);
         session.setBonus2xExpiresAt(NOW.plusSeconds(60));
-        stubFreshClaim(10034L);
+        stubFreshClaim(10074L);
 
         EarnVpClaimResponse result = service.claim(ACCOUNT, 10, SESSION, null);
 
-        assertEquals(34L, result.vpGranted());
-        verify(walletService).credit(eq(ACCOUNT), eq(34L), eq(EarnVpService.REASON_EARN_VP), any());
+        assertEquals(74L, result.vpGranted());
+        verify(walletService).credit(eq(ACCOUNT), eq(74L), eq(EarnVpService.REASON_EARN_VP), any());
     }
 
     @Test
@@ -271,7 +271,7 @@ class EarnVpServiceTest {
         EarnVpSession session = stubSession(2_000L);
         Instant expiresAt = NOW.plusSeconds(60);
         session.setBonus2xExpiresAt(expiresAt);
-        stubFreshClaim(10034L);
+        stubFreshClaim(10074L);
 
         service.claim(ACCOUNT, 10, SESSION, null);
 
@@ -283,12 +283,12 @@ class EarnVpServiceTest {
     void expired2xWindow_doesNotDoubleEarnVpClaim() {
         EarnVpSession session = stubSession(2_000L);
         session.setBonus2xExpiresAt(NOW.minusSeconds(1));
-        stubFreshClaim(10017L);
+        stubFreshClaim(10037L);
 
         EarnVpClaimResponse result = service.claim(ACCOUNT, 10, SESSION, null);
 
-        assertEquals(17L, result.vpGranted());
-        verify(walletService).credit(eq(ACCOUNT), eq(17L), eq(EarnVpService.REASON_EARN_VP), any());
+        assertEquals(37L, result.vpGranted());
+        verify(walletService).credit(eq(ACCOUNT), eq(37L), eq(EarnVpService.REASON_EARN_VP), any());
     }
 
     // ---- guards / idempotency / throttle ----------------------------------
