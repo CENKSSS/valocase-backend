@@ -127,8 +127,9 @@ public class CatalogService {
             return new PlayerView(weaponCategory, requiredLevel, null, null, null, null);
         }
 
+        int viewerLevel = progressionService.levelOf(viewer);
         boolean unlocked = category
-                .map(c -> progressionService.isCategoryUnlocked(viewer.getLevel(), c))
+                .map(c -> progressionService.isCategoryUnlocked(viewerLevel, c))
                 .orElse(true);
         boolean canOpen;
         String lockedReason;
@@ -143,7 +144,7 @@ public class CatalogService {
             lockedReason = null;
         }
         boolean affordable = balance != null && balance >= caseDef.getPriceVp();
-        return new PlayerView(weaponCategory, requiredLevel, canOpen, lockedReason, viewer.getLevel(), affordable);
+        return new PlayerView(weaponCategory, requiredLevel, canOpen, lockedReason, viewerLevel, affordable);
     }
 
     private static SkinResponse toSkinResponse(Skin skin) {

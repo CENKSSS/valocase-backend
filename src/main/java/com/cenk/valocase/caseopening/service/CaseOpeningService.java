@@ -83,9 +83,10 @@ public class CaseOpeningService {
         // VP charge or XP grant. A locked category never mutates state.
         Account account = accountRepository.findById(accountId)
                 .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Account not found: " + accountId));
+        int accountLevel = progressionService.levelOf(account);
         CaseCategory.fromCaseId(caseId).ifPresent(category -> {
-            if (!progressionService.isCategoryUnlocked(account.getLevel(), category)) {
-                throw new CategoryLockedException(category, account.getLevel());
+            if (!progressionService.isCategoryUnlocked(accountLevel, category)) {
+                throw new CategoryLockedException(category, accountLevel);
             }
         });
 

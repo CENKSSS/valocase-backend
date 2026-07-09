@@ -87,10 +87,16 @@ class CatalogServiceTest {
         return s;
     }
 
+    private static final long[] LEVEL_THRESHOLDS = {
+            0, 40, 95, 160, 250, 350, 465, 610, 775, 860, 945, 1050, 1155, 1250, 1350
+    };
+
     private static Account account(int level) {
         Account a = new Account();
         a.setId(ACCOUNT);
-        a.setLevel(level);
+        int capped = Math.min(level, LEVEL_THRESHOLDS.length);
+        a.setLevel(capped);
+        a.setTotalXp(LEVEL_THRESHOLDS[capped - 1]);
         return a;
     }
 
@@ -244,7 +250,7 @@ class CatalogServiceTest {
         assertTrue(detail.canOpen());
         assertNull(detail.lockedReason());
         assertTrue(detail.affordable());
-        assertEquals(20, detail.currentLevel());
+        assertEquals(15, detail.currentLevel());
     }
 
     @Test

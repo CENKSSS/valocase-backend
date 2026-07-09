@@ -64,12 +64,12 @@ class CaseOpeningServiceTest {
     private static final UUID ACCOUNT_ID = UUID.randomUUID();
     private static final String CASE_ID = "vandal_basic";
 
-    /** Account at a level high enough that every category is unlocked. */
+    /** Account with enough total XP that every category is unlocked (level 15). */
     private static Account unlockedAccount() {
         Account account = new Account();
-        account.setLevel(20);
+        account.setLevel(15);
         account.setCurrentLevelXp(0);
-        account.setTotalXp(0L);
+        account.setTotalXp(1350L);
         return account;
     }
 
@@ -167,9 +167,11 @@ class CaseOpeningServiceTest {
 
         // A successful open grants 5 XP and reports updated progression.
         assertEquals(5, result.progression().xpGranted());
-        assertEquals(20, result.progression().xpRequiredForNextLevel());
+        assertEquals(15, result.progression().level());
+        assertEquals(1355L, result.progression().totalXp());
         assertEquals(5, result.progression().currentLevelXp());
-        assertEquals(5L, result.progression().totalXp());
+        assertEquals(0, result.progression().xpRequiredForNextLevel());
+        assertEquals(true, result.progression().maxLevelReached());
 
         verify(walletService).debit(ACCOUNT_ID, 500L, CaseOpeningService.REASON_CASE_OPEN, openingId);
         verify(inventoryService).addItem(ACCOUNT_ID, skinId, InventoryService.SOURCE_CASE_OPENING, openingId);
