@@ -154,6 +154,22 @@ public class AccountService {
      */
     @Transactional
     public Account requireAccountByToken(String rawToken) {
+        Account account = resolveAndTouch(rawToken);
+        playerActivityService.recordActivity(account.getId());
+        return account;
+    }
+
+    /**
+     * Same authentication and lastSeenAt touch as {@link #requireAccountByToken}
+     * but without the request-estimated session tracking, so the precise session
+     * lifecycle endpoints manage sessions themselves without a competing row.
+     */
+    @Transactional
+    public Account resolveActiveAccount(String rawToken) {
+        return resolveAndTouch(rawToken);
+    }
+
+    private Account resolveAndTouch(String rawToken) {
         if (rawToken == null || rawToken.isBlank()) {
             throw new ApiException(HttpStatus.UNAUTHORIZED, "Missing X-Guest-Token header");
         }
@@ -173,7 +189,6 @@ public class AccountService {
         }
 
         account.setLastSeenAt(Instant.now());
-        playerActivityService.recordActivity(account.getId());
         return account;
     }
 }

@@ -56,4 +56,22 @@ public class PlayerSession {
 
     @Column(name = "app_version", length = 50)
     private String appVersion;
+
+    @Column(name = "client_session_id")
+    private UUID clientSessionId;
+
+    @Column(name = "installation_id")
+    private UUID installationId;
+
+    @Column(name = "lifecycle_sequence")
+    private Long lifecycleSequence;
+
+    @Column(name = "lifecycle_state", length = 20)
+    private String lifecycleState;
+
+    @Column(name = "last_heartbeat_at")
+    private Instant lastHeartbeatAt;
+
+    @Column(name = "explicit_ended_at")
+    private Instant explicitEndedAt;
 }

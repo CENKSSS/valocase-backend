@@ -131,12 +131,20 @@ public class PlayerActivityService {
     private void upsertSession(UUID accountId, Instant now) {
         Optional<PlayerSession> open =
                 sessionRepository.findFirstByAccountIdAndEndedAtIsNullOrderByStartedAtDesc(accountId);
-        if (open.isPresent()
-                && !open.get().getLastActivityAt().isBefore(now.minus(properties.getSessionTimeout()))) {
-            sessionRepository.touch(open.get().getId(), now);
-            return;
+        if (open.isPresent()) {
+            PlayerSession session = open.get();
+            // A precise client session is owned by the lifecycle service and its
+            // timeout scanner; a gameplay request only records fallback activity.
+            if (session.getClientSessionId() != null) {
+                sessionRepository.touch(session.getId(), now);
+                return;
+            }
+            if (!session.getLastActivityAt().isBefore(now.minus(properties.getSessionTimeout()))) {
+                sessionRepository.touch(session.getId(), now);
+                return;
+            }
+            sessionRepository.closeSession(session.getId(), END_REASON_INACTIVITY);
         }
-        open.ifPresent(stale -> sessionRepository.closeSession(stale.getId(), END_REASON_INACTIVITY));
 
         PlayerSession session = new PlayerSession();
         session.setAccountId(accountId);

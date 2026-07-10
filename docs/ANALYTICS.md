@@ -185,6 +185,168 @@ WHERE balance_before <> balance_after - amount;  -- must be 0
 Within minutes of players making requests, `player_sessions` starts filling and
 `admin_current_online_users` shows active players.
 
+## Precise client session lifecycle (V76)
+
+`V76__client_session_lifecycle.sql` adds an opt-in protocol the Unity client uses
+to report app foreground lifecycle precisely. It does not replace V75: sessions
+with a `client_session_id` are precise; sessions without one remain the V75
+request-estimated sessions and keep working. The server clock stays authoritative
+for every stored timestamp and duration; the client's `clientSentAtUtc` is
+diagnostic only and is never used in calculations.
+
+### Endpoints (existing X-Guest-Token auth; the account comes only from the token)
+
+- `POST /api/v1/analytics/session/start`
+- `POST /api/v1/analytics/session/heartbeat`
+- `POST /api/v1/analytics/session/pause`
+- `POST /api/v1/analytics/session/resume`
+- `POST /api/v1/analytics/session/end`
+
+All five return the same compact body and never expose analytics to the player:
+`{"serverSessionId": "<uuid|null>", "lifecycleState": "FOREGROUND|PAUSED|ENDED|NONE", "serverTimeUtc": "<iso-8601>"}`.
+`NONE` means no live session matched (e.g. a heartbeat after timeout); the client
+should send `start` again on the next foreground.
+
+### Request fields and enums
+
+- start and resume: `clientSessionId` (UUID), `installationId` (UUID),
+  `appVersion` (string, ≤50), `platform` (`ANDROID|IOS|EDITOR|UNKNOWN`,
+  case-insensitive; anything else stored as `UNKNOWN`), `clientSentAtUtc`
+  (ISO-8601, diagnostic), `lifecycleSequence` (integer 1..1000000000).
+- heartbeat and pause: `clientSessionId`, `clientSentAtUtc`, `lifecycleSequence`.
+- end: `clientSessionId`, `clientSentAtUtc`, `lifecycleSequence`, `endReason`
+  (`QUIT|LOGOUT`; blank/other → `UNKNOWN`). `REPLACED` and `INACTIVITY_TIMEOUT`
+  are assigned by the server only and are never accepted from a client.
+
+The client never supplies user id, account id, durations, login/logout times, VP,
+gameplay counts or online status; those are ignored if sent.
+
+### Lifecycle state machine
+
+`start` opens a session in `FOREGROUND` with one open foreground segment.
+`heartbeat` refreshes `last_heartbeat_at`/`last_activity_at`. `pause` closes the
+open segment (reason `PAUSE`) and moves to `PAUSED`. `resume` opens a new
+foreground segment and returns to `FOREGROUND`. `end` closes the open segment
+(reason `END`) and the session (`ENDED`). If heartbeats simply stop, the timeout
+scanner closes the session (`ENDED`).
+
+### Timestamp, session and segment rules
+
+Every timestamp is the server clock. Active foreground time is the sum of segment
+durations only; the currently open segment is measured up to its last
+server-observed heartbeat, never to `now()`, so no client exit time is invented.
+Background time is the gap between consecutive segments within a session and is
+excluded from foreground time. A graceful `end` sets `explicit_ended_at` and
+`is_estimated = false`; a timeout close leaves `explicit_ended_at` null, sets
+`is_estimated = true`, ends at the last observed activity, and uses
+`end_reason = 'INACTIVITY_TIMEOUT'`. A `start` for an account that still has an
+open session (a prior crash, or a request-estimated session) closes that one as
+`REPLACED` first, preserving one open session per account.
+
+### Production thresholds
+
+Client heartbeat interval is 30 seconds. `valocase.analytics.heartbeat-timeout`
+(default 2 minutes) is how long a session with no reported activity survives
+before the scanner closes it as a timeout; the scanner runs every
+`valocase.analytics.timeout-scan-interval` (default 30 seconds).
+`valocase.analytics.heartbeat-write-throttle` (default 5 seconds) drops redundant
+heartbeat writes. The views treat a foreground session with a heartbeat within
+**90 seconds** as online (baked into the view SQL). A force-closed app therefore
+stays online at most ~90 seconds, then is closed by the scanner within ~2 minutes.
+
+### Idempotency and concurrency
+
+One logical session per `(account_id, client_session_id)` and at most one open
+foreground segment per session are enforced by partial unique indexes. Row locks
+plus a bounded retry on unique collisions make duplicate start/heartbeat/pause/
+resume/end and concurrent or multi-instance requests idempotent: 100 rapid
+heartbeats and concurrent starts each collapse to a single session and segment. A
+`lifecycleSequence` at or below the stored value is treated as stale and cannot
+reverse newer state.
+
+### What is now exact vs. still limited
+
+Now exact from client lifecycle: app start, per-heartbeat presence, pause/resume,
+graceful end, active foreground duration excluding background, current app
+version, platform, installation id and client session id, and precise online
+(foreground + recent heartbeat). Still not knowable: the exact instant of a
+force-close, crash, battery kill or OS termination — those close by timeout at the
+last observed heartbeat (`is_estimated = true`), and the client's own
+`OnApplicationQuit` is best-effort, never guaranteed on Android/iOS.
+
+### New / changed views
+
+`admin_session_segments` and `admin_client_presence` are new. `admin_user_analytics`,
+`admin_current_online_users` and `admin_recent_sessions` keep all their V75 columns
+and gain lifecycle columns appended (V75 consumers are unaffected). Precise online
+lives in `admin_client_presence.is_online` and the `is_client_online` column;
+the V75 `is_currently_online` (last request within 5 minutes) is preserved.
+
+### Unity integration (exact paths and sample payloads)
+
+Generate a persistent random `installationId` (a plain `Guid`, stored in
+PlayerPrefs/secure storage — never a hardware id), and a fresh `clientSessionId`
+per app process. Increment `lifecycleSequence` monotonically from 1. After the
+guest token is available:
+
+Start / resume body:
+
+```json
+{
+  "clientSessionId": "8f14e45f-ceea-467a-9575-1111aaaa2222",
+  "installationId": "3d594650-3436-4f7e-9999-abcdef012345",
+  "appVersion": "1.4.2",
+  "platform": "ANDROID",
+  "clientSentAtUtc": "2026-07-10T18:00:00Z",
+  "lifecycleSequence": 1
+}
+```
+
+Heartbeat / pause body:
+
+```json
+{ "clientSessionId": "8f14e45f-ceea-467a-9575-1111aaaa2222", "clientSentAtUtc": "2026-07-10T18:00:30Z", "lifecycleSequence": 2 }
+```
+
+End body:
+
+```json
+{ "clientSessionId": "8f14e45f-ceea-467a-9575-1111aaaa2222", "clientSentAtUtc": "2026-07-10T18:05:00Z", "lifecycleSequence": 9, "endReason": "QUIT" }
+```
+
+Send `start` once after auth; `heartbeat` every 30s only while foregrounded (use
+unscaled realtime, no overlapping requests); `pause` on background and `resume` on
+return; `end` best-effort on quit. Analytics failures must never surface to the
+player or block gameplay.
+
+### Lifecycle verification queries (DataGrip)
+
+```sql
+SET TIME ZONE 'Europe/Istanbul';
+
+-- Currently online (precise: foreground + heartbeat within 90s).
+SELECT * FROM admin_client_presence WHERE is_online ORDER BY last_heartbeat_at DESC;
+
+-- Presence and app metadata for one user.
+SELECT username, lifecycle_state, current_app_version, current_platform,
+       current_installation_id, current_client_session_id,
+       last_app_session_start, last_heartbeat_at, last_pause_at, last_resume_at,
+       last_explicit_end_at, last_session_active_minutes,
+       total_active_foreground_minutes, total_background_minutes
+FROM admin_user_analytics WHERE username = 'HeavyPlayer';
+
+-- Foreground segments (active minutes per interval) for recent sessions.
+SELECT * FROM admin_session_segments ORDER BY started_at DESC LIMIT 100;
+
+-- How the last session closed (EXPLICIT vs TIMEOUT vs OPEN) per user.
+SELECT username, close_type, session_started_at, session_ended_at, is_estimated
+FROM admin_client_presence ORDER BY session_started_at DESC;
+
+-- A force-close shows as a TIMEOUT close with is_estimated true and no explicit end.
+SELECT * FROM admin_recent_sessions
+WHERE close_type = 'TIMEOUT' ORDER BY started_at DESC LIMIT 50;
+```
+
 ## Rollback
 
 Removes only the new analytics structures; no gameplay data is touched:
@@ -213,3 +375,40 @@ DELETE FROM flyway_schema_history WHERE version = '75';
 `AnalyticsConfig`, the two `recordActivity` calls in `AccountService`, the two
 `recordSkinsSold` calls in `InventoryService`, and the
 `valocase.analytics.*` properties.)
+
+### Reverting only V76 (keep V75)
+
+Removes only the lifecycle structures and restores the three V75 view definitions;
+V75 estimated sessions, all gameplay data, balances and timestamps are untouched.
+Validated on PostgreSQL 16 against a populated copy.
+
+```sql
+DROP VIEW IF EXISTS admin_client_presence;
+DROP VIEW IF EXISTS admin_session_segments;
+DROP VIEW IF EXISTS admin_recent_sessions;
+DROP VIEW IF EXISTS admin_current_online_users;
+DROP VIEW IF EXISTS admin_user_analytics;
+-- Recreate admin_user_analytics, admin_current_online_users and
+-- admin_recent_sessions by running their exact definitions from
+-- V75__player_activity_analytics.sql (the committed V75 view bodies).
+DROP INDEX IF EXISTS uq_player_sessions_account_client;
+DROP INDEX IF EXISTS idx_player_sessions_open_client;
+DROP INDEX IF EXISTS uq_player_session_segments_open;
+DROP INDEX IF EXISTS idx_player_session_segments_session;
+DROP TABLE IF EXISTS player_session_segments;
+ALTER TABLE player_sessions
+    DROP COLUMN IF EXISTS client_session_id,
+    DROP COLUMN IF EXISTS installation_id,
+    DROP COLUMN IF EXISTS lifecycle_sequence,
+    DROP COLUMN IF EXISTS lifecycle_state,
+    DROP COLUMN IF EXISTS last_heartbeat_at,
+    DROP COLUMN IF EXISTS explicit_ended_at;
+DELETE FROM flyway_schema_history WHERE version = '76';
+```
+
+(Reverting the Java changes means removing the lifecycle DTOs/enums, the
+`PlayerSessionSegment` entity and repository, `ClientSessionService`,
+`AnalyticsSessionController`, `AnalyticsSessionTimeoutScheduler`, the
+`PlayerSession` lifecycle fields, the `AccountService.resolveActiveAccount`
+method, the client-session guard in `PlayerActivityService`, and the new
+`valocase.analytics.heartbeat-*` / `timeout-scan-interval` properties.)
