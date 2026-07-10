@@ -86,6 +86,9 @@ public class ClientSessionService {
 
         if (existing.isPresent()) {
             PlayerSession s = existing.get();
+            if (isStale(s, seq)) {
+                return ack(s);
+            }
             closeOpenSessionsForAccount(accountId, s.getId(), now);
             if (s.getEndedAt() != null) {
                 reopen(s, installationId, appVersion, platform, seq, now);

@@ -127,6 +127,48 @@ class ClientSessionLifecycleIT {
     }
 
     @Test
+    void staleResumeDoesNotReverseNewerPause() {
+        UUID cs = UUID.randomUUID();
+        service.start(accountId, startReq(cs, 1));
+        service.pause(accountId, new SessionSignalRequest(cs.toString(), null, 3L));
+
+        SessionAckResponse ack = service.resume(accountId, startReq(cs, 2));
+
+        assertEquals("PAUSED", ack.lifecycleState());
+        assertEquals("PAUSED", state(cs));
+        assertEquals(0, segmentCount(cs, true));
+        assertEquals(1, segmentCount(cs, false));
+    }
+
+    @Test
+    void newerResumeIsAccepted() {
+        UUID cs = UUID.randomUUID();
+        service.start(accountId, startReq(cs, 1));
+        service.pause(accountId, new SessionSignalRequest(cs.toString(), null, 3L));
+
+        SessionAckResponse ack = service.resume(accountId, startReq(cs, 4));
+
+        assertEquals("FOREGROUND", ack.lifecycleState());
+        assertEquals("FOREGROUND", state(cs));
+        assertEquals(1, segmentCount(cs, true));
+        assertEquals(2, segmentCount(cs, false));
+    }
+
+    @Test
+    void duplicateResumeDoesNotCreateDuplicateSegments() {
+        UUID cs = UUID.randomUUID();
+        service.start(accountId, startReq(cs, 1));
+        service.pause(accountId, new SessionSignalRequest(cs.toString(), null, 2L));
+        service.resume(accountId, startReq(cs, 3));
+
+        SessionAckResponse ack = service.resume(accountId, startReq(cs, 3));
+
+        assertEquals("FOREGROUND", ack.lifecycleState());
+        assertEquals(1, segmentCount(cs, true));
+        assertEquals(2, segmentCount(cs, false));
+    }
+
+    @Test
     void explicitEndClosesSessionAndIsNotEstimated() {
         UUID cs = UUID.randomUUID();
         service.start(accountId, startReq(cs, 1));
