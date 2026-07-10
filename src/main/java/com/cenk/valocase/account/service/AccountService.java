@@ -13,6 +13,7 @@ import com.cenk.valocase.account.dto.AccountAvatarResponse;
 import com.cenk.valocase.account.dto.AccountProfileResponse;
 import com.cenk.valocase.account.dto.GuestRegisterResponse;
 import com.cenk.valocase.account.repository.AccountRepository;
+import com.cenk.valocase.analytics.service.PlayerActivityService;
 import com.cenk.valocase.common.exception.ApiException;
 import com.cenk.valocase.wallet.domain.Wallet;
 import com.cenk.valocase.wallet.service.WalletService;
@@ -48,6 +49,7 @@ public class AccountService {
 
     private final AccountRepository accountRepository;
     private final WalletService walletService;
+    private final PlayerActivityService playerActivityService;
 
     @Transactional
     public GuestRegisterResponse registerGuest() {
@@ -64,6 +66,8 @@ public class AccountService {
         account = accountRepository.save(account);
 
         Wallet wallet = walletService.createInitialWallet(account.getId(), STARTING_VP);
+
+        playerActivityService.recordActivity(account.getId());
 
         return new GuestRegisterResponse(
                 account.getId().toString(),
@@ -169,6 +173,7 @@ public class AccountService {
         }
 
         account.setLastSeenAt(Instant.now());
+        playerActivityService.recordActivity(account.getId());
         return account;
     }
 }

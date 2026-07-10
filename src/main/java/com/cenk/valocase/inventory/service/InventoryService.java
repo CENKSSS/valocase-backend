@@ -12,6 +12,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.cenk.valocase.analytics.service.PlayerActivityService;
 import com.cenk.valocase.catalog.domain.Skin;
 import com.cenk.valocase.catalog.repository.SkinRepository;
 import com.cenk.valocase.common.exception.ApiException;
@@ -46,6 +47,7 @@ public class InventoryService {
     private final SkinRepository skinRepository;
     private final WalletService walletService;
     private final ApplicationEventPublisher eventPublisher;
+    private final PlayerActivityService playerActivityService;
 
     @Transactional(readOnly = true)
     public InventoryResponse getInventory(UUID accountId) {
@@ -97,6 +99,7 @@ public class InventoryService {
         inventoryItemRepository.delete(item);
 
         long newBalance = creditAndGetBalance(accountId, vpGained, referenceId);
+        playerActivityService.recordSkinsSold(accountId, 1, vpGained, referenceId);
 
         eventPublisher.publishEvent(new MissionProgressEvent(accountId, MissionEventTypes.SKIN_SOLD, 1));
         eventPublisher.publishEvent(new MissionProgressEvent(
@@ -147,6 +150,7 @@ public class InventoryService {
         long total = items.stream().mapToLong(item -> valueOf(skinsById.get(item.getSkinId()))).sum();
         inventoryItemRepository.deleteAll(items);
         long newBalance = creditAndGetBalance(accountId, total, null);
+        playerActivityService.recordSkinsSold(accountId, items.size(), total, null);
 
         eventPublisher.publishEvent(new MissionProgressEvent(accountId, MissionEventTypes.SKIN_SOLD, items.size()));
         eventPublisher.publishEvent(new MissionProgressEvent(

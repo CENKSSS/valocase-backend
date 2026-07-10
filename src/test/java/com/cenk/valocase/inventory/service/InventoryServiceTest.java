@@ -22,6 +22,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 
+import com.cenk.valocase.analytics.service.PlayerActivityService;
 import com.cenk.valocase.catalog.domain.Skin;
 import com.cenk.valocase.catalog.repository.SkinRepository;
 import com.cenk.valocase.common.exception.ApiException;
@@ -39,6 +40,7 @@ class InventoryServiceTest {
     @Mock private SkinRepository skinRepository;
     @Mock private WalletService walletService;
     @Mock private ApplicationEventPublisher eventPublisher;
+    @Mock private PlayerActivityService playerActivityService;
 
     @InjectMocks private InventoryService inventoryService;
 
