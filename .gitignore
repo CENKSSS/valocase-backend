@@ -35,3 +35,30 @@ build/
 ### Agentic QE ###
 .agentic-qe/
 .mcp.json
+
+### Secrets / local config ###
+# The prod profile reads every sensitive value from the environment, so no env
+# file belongs in the repo.
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.jks
+application-local.properties
+src/main/resources/application-local.properties
+
+### Per-developer Claude Code settings (.claude/settings.json stays shared) ###
+.claude/settings.local.json
+
+### Logs and local databases ###
+*.log
+logs/
+*.db
+*.sqlite
+*.sqlite3
+
+### OS junk ###
+.DS_Store
+Thumbs.db
+desktop.ini

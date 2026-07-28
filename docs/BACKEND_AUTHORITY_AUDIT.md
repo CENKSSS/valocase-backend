@@ -757,6 +757,7 @@ Suggested response shape:
   "rules": {
     "winnerRule": "HIGHEST_TOTAL_VP",
     "tieBreak": "LOWEST_SLOT_INDEX",
+    "drawRule": "ALL_EQUAL_TOTAL_VP_REFUNDS_ENTRY",
     "rewardRule": "WINNER_TAKES_ALL_ROLLED_SKINS"
   }
 }
@@ -916,7 +917,7 @@ Battle rules are likely duplicated in Unity UI.
 
 Current risk:
 
-- Constants exist in backend: rounds 1..5, participants 2..4, add-bot delay 3 seconds, start delay 1 second, lobby timeout 2 minutes, connection timeout 15 seconds, tie-break lowest index, winner-takes-all.
+- Constants exist in backend: rounds 1..5, participants 2..4, add-bot delay 3 seconds, start delay 1 second, lobby timeout 90 seconds for player-created lobbies and 3 minutes for free event lobbies, connection timeout 15 seconds, tie-break lowest index, winner-takes-all, draw when every participant shares the same total VP (no winner, no grant, entry refunded).
 - Unity needs these to render UI and timers.
 
 Correct owner:

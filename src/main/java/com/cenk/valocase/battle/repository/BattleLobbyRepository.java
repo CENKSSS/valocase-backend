@@ -33,12 +33,32 @@ public interface BattleLobbyRepository extends JpaRepository<BattleLobby, UUID> 
      */
     List<BattleLobby> findByStatusOrderByCreatedAtDesc(LobbyStatus status);
 
-    /** Stale lobbies for the cleanup job: same status, created before the cutoff. */
-    List<BattleLobby> findByStatusAndCreatedAtBefore(LobbyStatus status, Instant createdBefore);
+    /**
+     * Stale lobbies for the cleanup job. Player-created and event lobbies expire
+     * on different windows, so each kind is matched against its own cutoff in one
+     * query — no lobby is picked up before it is genuinely stale.
+     */
+    @Query("""
+            select l from BattleLobby l
+            where l.status = :status
+              and ((l.event = false and l.createdAt < :playerCutoff)
+                or (l.event = true and l.createdAt < :eventCutoff))
+            """)
+    List<BattleLobby> findStaleByStatus(@Param("status") LobbyStatus status,
+                                        @Param("playerCutoff") Instant playerCutoff,
+                                        @Param("eventCutoff") Instant eventCutoff);
 
     /** Full lobbies whose start delay has elapsed but were never resolved by a poll. */
     List<BattleLobby> findByStatusAndReadyAtLessThanEqual(LobbyStatus status, Instant readyAtMax);
 
-    /** True once an event lobby for this 2-day window exists (any status). */
+    /** True once an event lobby for this window exists (any status). */
     boolean existsByEventWindowKey(String eventWindowKey);
+
+    /**
+     * When the most recent Free Lobby Event was created, in any status — this is
+     * what the next event's cadence is measured from. Empty until the first event
+     * lobby has ever been created.
+     */
+    @Query("select max(l.createdAt) from BattleLobby l where l.event = true")
+    Optional<Instant> latestEventLobbyCreatedAt();
 }

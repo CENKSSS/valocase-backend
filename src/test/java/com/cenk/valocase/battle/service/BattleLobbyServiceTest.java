@@ -17,6 +17,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
@@ -35,7 +36,10 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 
 import com.cenk.valocase.account.domain.Account;
+import static com.cenk.valocase.battle.service.BattleLobbyService.LOBBY_TIMEOUT;
+
 import com.cenk.valocase.account.repository.AccountRepository;
+import com.cenk.valocase.analytics.service.PlayerPresenceService;
 import com.cenk.valocase.battle.domain.Battle;
 import com.cenk.valocase.battle.domain.BattleLobby;
 import com.cenk.valocase.battle.domain.BattleLobbySlot;
@@ -89,6 +93,7 @@ class BattleLobbyServiceTest {
     @Mock private BattleLobbySlotRepository slotRepository;
     @Mock private AccountRepository accountRepository;
     @Mock private ProgressionService progressionService;
+    @Mock private PlayerPresenceService playerPresenceService;
     @Mock private ApplicationEventPublisher eventPublisher;
 
     @InjectMocks private BattleLobbyService service;
@@ -496,7 +501,8 @@ class BattleLobbyServiceTest {
         lobby.setId(LOBBY);
         lobby.setCreatorAccountId(CREATOR);
         lobby.setStatus(LobbyStatus.WAITING);
-        lobby.setCreatedAt(Instant.now().minus(3, ChronoUnit.MINUTES)); // past 2-minute timeout
+        // Comfortably past LOBBY_TIMEOUT, not sitting on the boundary.
+        lobby.setCreatedAt(Instant.now().minus(LOBBY_TIMEOUT).minus(1, ChronoUnit.MINUTES));
 
         when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
         when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(
@@ -517,7 +523,44 @@ class BattleLobbyServiceTest {
         lobby.setId(LOBBY);
         lobby.setCreatorAccountId(CREATOR);
         lobby.setStatus(LobbyStatus.WAITING);
-        lobby.setCreatedAt(Instant.now().minus(90, ChronoUnit.SECONDS)); // under 2 minutes
+        lobby.setCreatedAt(Instant.now().minus(30, ChronoUnit.SECONDS)); // well under LOBBY_TIMEOUT
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+
+        service.cancelStaleLobby(LOBBY);
+
+        assertEquals(LobbyStatus.WAITING, lobby.getStatus());
+        verify(walletService, never()).credit(any(), anyLong(), any(), any());
+    }
+
+    /** A WAITING lobby of either kind, created {@code age} ago. */
+    private BattleLobby waitingLobby(boolean event, Duration age) {
+        BattleLobby lobby = new BattleLobby();
+        lobby.setId(LOBBY);
+        lobby.setCreatorAccountId(event ? BattleLobbyService.SYSTEM_EVENT_ACCOUNT_ID : CREATOR);
+        lobby.setStatus(LobbyStatus.WAITING);
+        lobby.setEvent(event);
+        lobby.setCreatedAt(Instant.now().minus(age));
+        return lobby;
+    }
+
+    @Test
+    void playerLobby_expiresAt90Seconds() {
+        // 100s: past the player window, but well inside the event one.
+        BattleLobby lobby = waitingLobby(false, Duration.ofSeconds(100));
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY))
+                .thenReturn(List.of(slot(0, SlotType.REAL, CREATOR, true)));
+
+        service.cancelStaleLobby(LOBBY);
+
+        assertEquals(LobbyStatus.CANCELLED, lobby.getStatus());
+        verify(walletService).credit(eq(CREATOR), eq(200L), any(), eq(LOBBY));
+    }
+
+    @Test
+    void eventLobby_survivesTheShortPlayerWindow() {
+        // Same 100s age: an event lobby is still open because it gets 3 minutes.
+        BattleLobby lobby = waitingLobby(true, Duration.ofSeconds(100));
         when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
 
         service.cancelStaleLobby(LOBBY);
@@ -527,13 +570,44 @@ class BattleLobbyServiceTest {
     }
 
     @Test
+    void eventLobby_expiresAtThreeMinutes() {
+        BattleLobby lobby = waitingLobby(true, BattleLobbyService.EVENT_LOBBY_TIMEOUT.plusSeconds(30));
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY))
+                .thenReturn(List.of(slot(0, SlotType.EMPTY, null, false)));
+
+        service.cancelStaleLobby(LOBBY);
+
+        assertEquals(LobbyStatus.CANCELLED, lobby.getStatus());
+        // Nobody is ever charged for an event lobby, so nothing is refunded.
+        verify(walletService, never()).credit(any(), anyLong(), any(), any());
+    }
+
+    @Test
+    void staleSweep_asksForBothWindows_shortForPlayersLongForEvents() {
+        when(lobbyRepository.findStaleByStatus(eq(LobbyStatus.WAITING), any(), any())).thenReturn(List.of());
+
+        service.staleWaitingLobbyIds();
+
+        ArgumentCaptor<Instant> playerCutoff = ArgumentCaptor.forClass(Instant.class);
+        ArgumentCaptor<Instant> eventCutoff = ArgumentCaptor.forClass(Instant.class);
+        verify(lobbyRepository).findStaleByStatus(
+                eq(LobbyStatus.WAITING), playerCutoff.capture(), eventCutoff.capture());
+        // The event cutoff reaches further back, so event lobbies are swept later.
+        assertTrue(eventCutoff.getValue().isBefore(playerCutoff.getValue()));
+        assertEquals(
+                BattleLobbyService.EVENT_LOBBY_TIMEOUT.minus(LOBBY_TIMEOUT),
+                Duration.between(eventCutoff.getValue(), playerCutoff.getValue()));
+    }
+
+    @Test
     void listOpenLobbies_excludesExpired_keepsFresh() {
         BattleLobby expired = new BattleLobby();
         expired.setId(UUID.randomUUID());
         expired.setCreatorAccountId(CREATOR);
         expired.setCaseId(CASE_ID);
         expired.setStatus(LobbyStatus.WAITING);
-        expired.setCreatedAt(Instant.now().minus(3, ChronoUnit.MINUTES)); // expired
+        expired.setCreatedAt(Instant.now().minus(LOBBY_TIMEOUT).minus(1, ChronoUnit.MINUTES)); // expired
 
         BattleLobby fresh = new BattleLobby();
         fresh.setId(UUID.randomUUID());
@@ -655,6 +729,133 @@ class BattleLobbyServiceTest {
         service.getLobby(CREATOR, LOBBY);
 
         verify(inventoryService, times(4)).addItem(eq(CREATOR), eq("skin_a"), any(), any());
+    }
+
+    @Test
+    void draw_refundsEveryRealPlayer_grantsNothing_andReportsNoWinner() {
+        BattleLobby lobby = startingLobby(2);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(
+                slot(0, SlotType.REAL, CREATOR, true),
+                slot(1, SlotType.REAL, JOINER, false)));
+        stubResolve();
+        when(battleResolver.isDraw(any())).thenReturn(true);
+
+        LobbyResponse res = service.getLobby(CREATOR, LOBBY);
+
+        assertEquals(LobbyStatus.COMPLETED.name(), res.status());
+        assertTrue(res.isDraw());
+        // -1 and null names, so a client resolving the winner by index or by name finds nobody.
+        assertEquals(Integer.valueOf(BattleResolver.DRAW_WINNER_INDEX), res.winnerSlotIndex());
+        assertNull(res.winnerDisplayName());
+        assertNull(res.winnerAvatarId());
+        assertEquals(200L, res.refundVp()); // the polling player's own entry charge
+
+        verify(walletService).credit(
+                eq(CREATOR), eq(200L), eq(BattleLobbyService.REASON_LOBBY_DRAW_REFUND), eq(LOBBY));
+        verify(walletService).credit(
+                eq(JOINER), eq(200L), eq(BattleLobbyService.REASON_LOBBY_DRAW_REFUND), eq(LOBBY));
+        verify(inventoryService, never()).addItem(any(), any(), any(), any());
+        verify(progressionService, never()).grantCaseOpenXp(any(), anyInt());
+        verify(battleResolver, never()).winningIndex(any());
+    }
+
+    @Test
+    void draw_botSlotIsNotRefunded() {
+        BattleLobby lobby = startingLobby(2);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(
+                slot(0, SlotType.REAL, CREATOR, true),
+                slot(1, SlotType.BOT, null, false)));
+        stubResolve();
+        when(battleResolver.isDraw(any())).thenReturn(true);
+
+        service.getLobby(CREATOR, LOBBY);
+
+        verify(walletService, times(1)).credit(any(), anyLong(), any(), any());
+        verify(walletService).credit(
+                eq(CREATOR), eq(200L), eq(BattleLobbyService.REASON_LOBBY_DRAW_REFUND), eq(LOBBY));
+    }
+
+    @Test
+    void draw_refundVpIsPerViewer() {
+        BattleLobby lobby = startingLobby(2);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(
+                slot(0, SlotType.REAL, CREATOR, true),
+                slot(1, SlotType.REAL, JOINER, false)));
+        stubResolve();
+        when(battleResolver.isDraw(any())).thenReturn(true);
+
+        // A spectator holds no slot, so nothing was refunded to them.
+        LobbyResponse res = service.getLobby(OTHER, LOBBY);
+
+        assertTrue(res.isDraw());
+        assertEquals(0L, res.refundVp());
+    }
+
+    @Test
+    void draw_repeatedPoll_doesNotRefundTwice() {
+        BattleLobby lobby = startingLobby(2);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(
+                slot(0, SlotType.REAL, CREATOR, true),
+                slot(1, SlotType.REAL, JOINER, false)));
+        stubResolve();
+        when(battleResolver.isDraw(any())).thenReturn(true);
+
+        service.getLobby(CREATOR, LOBBY);
+        LobbyResponse second = service.getLobby(CREATOR, LOBBY);
+
+        // The second read still reports the draw, but resolves (and refunds) nothing.
+        assertTrue(second.isDraw());
+        assertEquals(200L, second.refundVp());
+        verify(walletService, times(1)).credit(
+                eq(CREATOR), eq(200L), eq(BattleLobbyService.REASON_LOBBY_DRAW_REFUND), eq(LOBBY));
+        verify(walletService, times(1)).credit(
+                eq(JOINER), eq(200L), eq(BattleLobbyService.REASON_LOBBY_DRAW_REFUND), eq(LOBBY));
+    }
+
+    @Test
+    void draw_freeEventLobby_completesWithoutRefund() {
+        BattleLobby lobby = startingLobby(2);
+        lobby.setEntryCost(0L);
+        lobby.setEvent(true);
+        BattleLobbySlot first = slot(0, SlotType.REAL, CREATOR, false);
+        first.setChargedVp(0L);
+        BattleLobbySlot second = slot(1, SlotType.REAL, JOINER, false);
+        second.setChargedVp(0L);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(first, second));
+        stubResolve();
+        when(battleResolver.isDraw(any())).thenReturn(true);
+
+        LobbyResponse res = service.getLobby(CREATOR, LOBBY);
+
+        assertTrue(res.isDraw());
+        assertEquals(0L, res.refundVp());
+        verify(walletService, never()).credit(any(), anyLong(), any(), any());
+    }
+
+    @Test
+    void normalWin_reportsNoDrawAndNoRefund() {
+        BattleLobby lobby = startingLobby(2);
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(
+                slot(0, SlotType.REAL, CREATOR, true),
+                slot(1, SlotType.REAL, JOINER, false)));
+        stubResolve();
+        when(battleResolver.isDraw(any())).thenReturn(false);
+        when(battleResolver.winningIndex(any())).thenReturn(0);
+
+        LobbyResponse res = service.getLobby(CREATOR, LOBBY);
+
+        assertFalse(res.isDraw());
+        assertEquals(0L, res.refundVp());
+        assertEquals(Integer.valueOf(0), res.winnerSlotIndex());
+        // winnerDisplayName must match the winning slot exactly, or the client shows no winner.
+        assertEquals(res.slots().get(0).displayName(), res.winnerDisplayName());
+        verify(walletService, never()).credit(any(), anyLong(), any(), any());
     }
 
     @Test
@@ -1003,6 +1204,22 @@ class BattleLobbyServiceTest {
     }
 
     @Test
+    void listOpenLobbies_keepsAnEventLobbyPastThePlayerWindow() {
+        // The list view applies the same per-kind expiry as the cleanup sweep, so
+        // a 100s-old event lobby is still browsable even though a player lobby of
+        // the same age would already be gone.
+        BattleLobby ev = eventLobby();
+        ev.setCreatedAt(Instant.now().minus(100, ChronoUnit.SECONDS));
+        when(lobbyRepository.findByStatusOrderByCreatedAtDesc(LobbyStatus.WAITING)).thenReturn(List.of(ev));
+        when(lobbyCaseRepository.findByLobbyIdInOrderByOrdinalAsc(any())).thenReturn(List.of());
+        when(caseDefinitionRepository.findAllById(any())).thenReturn(List.of(caseDef("classic_basic", 1150)));
+        when(slotRepository.findByLobbyIdInOrderBySlotIndexAsc(any()))
+                .thenReturn(List.of(slot(0, SlotType.EMPTY, null, false), slot(1, SlotType.EMPTY, null, false)));
+
+        assertEquals(1, service.listOpenLobbies(JOINER).size());
+    }
+
+    @Test
     void joinEventLobby_doesNotDebitWallet_andFillsSlotFree() {
         BattleLobby ev = eventLobby();
         BattleLobbySlot empty0 = slot(0, SlotType.EMPTY, null, false);
@@ -1038,9 +1255,10 @@ class BattleLobbyServiceTest {
 
     @Test
     void eventWindowKey_isStableWithinWindow_andChangesAcrossWindows() {
-        Instant inWindow = Instant.ofEpochSecond(100_000);
-        Instant sameWindow = Instant.ofEpochSecond(172_799);
-        Instant nextWindow = Instant.ofEpochSecond(172_800);
+        // Windows are EVENT_INTERVAL (15 min = 900 s) wide, floored to the epoch.
+        Instant inWindow = Instant.ofEpochSecond(900);
+        Instant sameWindow = Instant.ofEpochSecond(1_799);
+        Instant nextWindow = Instant.ofEpochSecond(1_800);
 
         assertEquals(
                 BattleLobbyService.currentEventWindowKey(inWindow),
@@ -1048,5 +1266,150 @@ class BattleLobbyServiceTest {
         assertNotEquals(
                 BattleLobbyService.currentEventWindowKey(inWindow),
                 BattleLobbyService.currentEventWindowKey(nextWindow));
+    }
+
+    @Test
+    void eventWindowKey_differsForAnyTwoInstantsOneIntervalApart() {
+        // The key is the multi-instance dedup guard, so two events spaced by the
+        // shortest possible cadence must never land on the same key.
+        long interval = BattleLobbyService.EVENT_INTERVAL.getSeconds();
+        for (long offset = 0; offset < interval; offset += 137) {
+            Instant first = Instant.ofEpochSecond(1_000_000 + offset);
+            assertNotEquals(
+                    BattleLobbyService.currentEventWindowKey(first),
+                    BattleLobbyService.currentEventWindowKey(first.plusSeconds(interval)),
+                    "keys collided for offset " + offset);
+        }
+    }
+
+    /** Stubs everything createEventLobby needs once it decides an event is due. */
+    private void stubEventCreation() {
+        stubEventCases();
+        when(lobbyRepository.existsByEventWindowKey(any())).thenReturn(false);
+        when(lobbyRepository.saveAndFlush(any(BattleLobby.class))).thenAnswer(inv -> {
+            BattleLobby l = inv.getArgument(0);
+            l.setId(LOBBY);
+            return l;
+        });
+        when(slotRepository.saveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+    }
+
+    @Test
+    void createEventLobby_busyGame_createsEveryFifteenMinutes() {
+        when(playerPresenceService.onlinePlayerCount()).thenReturn(10L);
+        when(lobbyRepository.latestEventLobbyCreatedAt())
+                .thenReturn(Optional.of(Instant.now().minus(16, ChronoUnit.MINUTES)));
+        stubEventCreation();
+
+        assertTrue(service.createEventLobby().isPresent());
+    }
+
+    @Test
+    void createEventLobby_busyGame_skipsBeforeFifteenMinutes() {
+        when(playerPresenceService.onlinePlayerCount()).thenReturn(10L);
+        when(lobbyRepository.latestEventLobbyCreatedAt())
+                .thenReturn(Optional.of(Instant.now().minus(14, ChronoUnit.MINUTES)));
+
+        assertTrue(service.createEventLobby().isEmpty());
+        verify(lobbyRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void createEventLobby_sixOnline_stillUsesTheFastCadence() {
+        // 6 is the threshold itself: "fewer than 6" is slow, 6 is already fast.
+        when(playerPresenceService.onlinePlayerCount()).thenReturn(6L);
+        when(lobbyRepository.latestEventLobbyCreatedAt())
+                .thenReturn(Optional.of(Instant.now().minus(16, ChronoUnit.MINUTES)));
+        stubEventCreation();
+
+        assertTrue(service.createEventLobby().isPresent());
+    }
+
+    @Test
+    void createEventLobby_quietGame_waitsThirtyMinutes() {
+        when(playerPresenceService.onlinePlayerCount()).thenReturn(5L);
+        when(lobbyRepository.latestEventLobbyCreatedAt())
+                .thenReturn(Optional.of(Instant.now().minus(20, ChronoUnit.MINUTES)));
+
+        // 20 minutes is past the fast cadence but short of the low-population one.
+        assertTrue(service.createEventLobby().isEmpty());
+        verify(lobbyRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void createEventLobby_quietGame_createsAfterThirtyMinutes() {
+        when(playerPresenceService.onlinePlayerCount()).thenReturn(0L);
+        when(lobbyRepository.latestEventLobbyCreatedAt())
+                .thenReturn(Optional.of(Instant.now().minus(31, ChronoUnit.MINUTES)));
+        stubEventCreation();
+
+        assertTrue(service.createEventLobby().isPresent());
+    }
+
+    @Test
+    void createEventLobby_quietGameThatFillsUp_becomesDueImmediately() {
+        // Waited 20 minutes under the slow cadence, then players arrived: the
+        // cadence is re-read every run, so the event is due now, not at 30.
+        when(playerPresenceService.onlinePlayerCount()).thenReturn(8L);
+        when(lobbyRepository.latestEventLobbyCreatedAt())
+                .thenReturn(Optional.of(Instant.now().minus(20, ChronoUnit.MINUTES)));
+        stubEventCreation();
+
+        assertTrue(service.createEventLobby().isPresent());
+    }
+
+    @Test
+    void createEventLobby_playersArriveEarlyInAQuietWait_stillWaitsOutTheFastCadence() {
+        // Quiet start put the event 30 minutes out; 10 minutes in, players arrive.
+        // The requirement drops to 15, but only 10 have elapsed, so it is not due.
+        when(playerPresenceService.onlinePlayerCount()).thenReturn(10L);
+        when(lobbyRepository.latestEventLobbyCreatedAt())
+                .thenReturn(Optional.of(Instant.now().minus(10, ChronoUnit.MINUTES)));
+
+        assertTrue(service.createEventLobby().isEmpty());
+        verify(lobbyRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void createEventLobby_playersArriveEarly_thenFiresAtFifteenNotThirty() {
+        // Same wait five minutes later: 15 elapsed under the fast cadence is due,
+        // so a quiet wait that filled up costs 15 minutes total, never 30.
+        when(playerPresenceService.onlinePlayerCount()).thenReturn(10L);
+        when(lobbyRepository.latestEventLobbyCreatedAt())
+                .thenReturn(Optional.of(Instant.now().minus(15, ChronoUnit.MINUTES).minusSeconds(1)));
+        stubEventCreation();
+
+        assertTrue(service.createEventLobby().isPresent());
+    }
+
+    @Test
+    void createEventLobby_waitNeverExceedsTheLowPopulationCadence() {
+        // Nobody online at all: the slow cadence is the hard ceiling, so time
+        // spent waiting can never be topped up beyond it.
+        when(playerPresenceService.onlinePlayerCount()).thenReturn(0L);
+        when(lobbyRepository.latestEventLobbyCreatedAt()).thenReturn(Optional.of(
+                Instant.now().minus(BattleLobbyService.EVENT_INTERVAL_LOW_POPULATION).minusSeconds(1)));
+        stubEventCreation();
+
+        assertTrue(service.createEventLobby().isPresent());
+    }
+
+    @Test
+    void createEventLobby_neverFiresBeforeTheFastCadence_howeverBusy() {
+        when(playerPresenceService.onlinePlayerCount()).thenReturn(500L);
+        when(lobbyRepository.latestEventLobbyCreatedAt()).thenReturn(Optional.of(
+                Instant.now().minus(BattleLobbyService.EVENT_INTERVAL).plusSeconds(30)));
+
+        assertTrue(service.createEventLobby().isEmpty());
+        verify(lobbyRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void createEventLobby_firstEverRun_createsImmediately() {
+        when(playerPresenceService.onlinePlayerCount()).thenReturn(0L);
+        when(lobbyRepository.latestEventLobbyCreatedAt()).thenReturn(Optional.empty());
+        stubEventCreation();
+
+        assertTrue(service.createEventLobby().isPresent());
     }
 }

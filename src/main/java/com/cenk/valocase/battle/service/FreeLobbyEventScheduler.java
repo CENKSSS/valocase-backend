@@ -8,14 +8,18 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Creates one server-authoritative Free Lobby Event every 2 days by delegating
- * to the locked, window-keyed {@link BattleLobbyService#createEventLobby()}.
+ * Drives the server-authoritative Free Lobby Event by delegating to the locked,
+ * window-keyed {@link BattleLobbyService#createEventLobby()}.
  *
- * <p>The cron fires on each 2-day boundary; the event lobby's {@code event_window_key}
- * is derived from the wall clock (floored to the 2-day window), so a late run
- * or a restart within the same window creates nothing. When multiple instances run
- * the scheduler at once, the database UNIQUE constraint lets exactly one insert
- * win and the loser's {@link DataIntegrityViolationException} is swallowed here.
+ * <p>The cron only decides <em>when to check</em>, not when an event happens:
+ * the cadence itself is owned by the service and varies with how many players
+ * are online, so this fires every minute and the service creates a lobby only on
+ * the ticks where the next event is actually due. A minute of granularity keeps
+ * the event within a minute of its nominal cadence at negligible cost.
+ *
+ * <p>When multiple instances run the scheduler at once, the database UNIQUE
+ * constraint on {@code event_window_key} lets exactly one insert win and the
+ * loser's {@link DataIntegrityViolationException} is swallowed here.
  */
 @Component
 @RequiredArgsConstructor
@@ -24,7 +28,7 @@ public class FreeLobbyEventScheduler {
 
     private final BattleLobbyService lobbyService;
 
-    @Scheduled(cron = "${valocase.lobby.event-cron:0 0 0 */2 * *}", zone = "UTC")
+    @Scheduled(cron = "${valocase.lobby.event-cron:0 * * * * *}", zone = "UTC")
     public void run() {
         try {
             lobbyService.createEventLobby();

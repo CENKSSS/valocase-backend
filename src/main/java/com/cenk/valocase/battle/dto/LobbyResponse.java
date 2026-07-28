@@ -19,6 +19,14 @@ import java.util.List;
  * {@code entryCost} is always 0 and {@code eventType} is set (e.g. FREE_LOBBY) so
  * Unity can show a FREE card. Both fields are appended, so existing clients are
  * unaffected.
+ *
+ * <p>{@code isDraw} is true when every slot ended on the same total VP: there is
+ * no winner, nothing was granted, and each real player was refunded. In that case
+ * {@code winnerSlotIndex} is {@code -1} and {@code winnerDisplayName} /
+ * {@code winnerAvatarId} are null, so a client that resolves the winner by index
+ * or by name finds nobody. {@code refundVp} is viewer-specific: it is the amount
+ * returned to the account requesting this response, and 0 for everyone else and
+ * for every non-draw result.
  */
 public record LobbyResponse(
         String battleId,
@@ -41,6 +49,8 @@ public record LobbyResponse(
         String winnerAvatarId,
         Boolean winnerRewarded,
         boolean isEventLobby,
-        String eventType
+        String eventType,
+        boolean isDraw,
+        long refundVp
 ) {
 }

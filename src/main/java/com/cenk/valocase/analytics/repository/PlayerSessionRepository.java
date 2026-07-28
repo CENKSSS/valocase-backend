@@ -37,6 +37,26 @@ public interface PlayerSessionRepository extends JpaRepository<PlayerSession, UU
             """, nativeQuery = true)
     List<UUID> findStaleOpenClientSessionIds(@Param("cutoff") Instant cutoff);
 
+    /**
+     * Distinct real players online right now: an open client session in the
+     * FOREGROUND state whose last heartbeat is newer than the cutoff. This is the
+     * same predicate the V76 {@code is_client_online} views use, so the number
+     * here and the number an admin sees cannot disagree. Only ACTIVE accounts
+     * count and the system event account is excluded.
+     */
+    @Query(value = """
+            SELECT COUNT(DISTINCT s.account_id)
+            FROM player_sessions s
+            JOIN accounts a ON a.id = s.account_id
+            WHERE s.ended_at IS NULL
+              AND s.client_session_id IS NOT NULL
+              AND s.lifecycle_state = 'FOREGROUND'
+              AND s.last_heartbeat_at >= :cutoff
+              AND a.status = 'ACTIVE'
+              AND a.id <> '00000000-0000-0000-0000-000000000001'
+            """, nativeQuery = true)
+    long countOnlinePlayers(@Param("cutoff") Instant cutoff);
+
     @Modifying
     @Query("UPDATE PlayerSession s SET s.lastActivityAt = :now WHERE s.id = :id AND s.lastActivityAt < :now")
     int touch(@Param("id") UUID id, @Param("now") Instant now);

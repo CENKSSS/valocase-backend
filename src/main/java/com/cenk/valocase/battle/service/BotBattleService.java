@@ -48,6 +48,10 @@ import lombok.RequiredArgsConstructor;
  * rolls skins for the user (index 0) and bots, decides the winner, and grants
  * all rolled skins to the user only on a win. Any failure rolls back the charge,
  * the records, and any grants together.
+ *
+ * <p>If every participant ends on the same total VP the battle is a draw: there
+ * is no winner, nothing is granted, and the entry charge is returned inside the
+ * same transaction — so the reported balance is already the post-refund one.
  */
 @Service
 @RequiredArgsConstructor
@@ -59,6 +63,8 @@ public class BotBattleService {
     public static final int PARTICIPANTS_MAX = 4;
 
     public static final String REASON_BATTLE_ENTRY = "BATTLE_ENTRY";
+    /** Wallet reason for returning the entry charge after a drawn battle. */
+    public static final String REASON_BATTLE_DRAW_REFUND = "BATTLE_DRAW_REFUND";
     public static final String INVENTORY_SOURCE_BATTLE_REWARD = "BATTLE_REWARD";
 
     private final CaseDefinitionRepository caseDefinitionRepository;
@@ -142,8 +148,11 @@ public class BotBattleService {
             rolledByParticipant.add(rolls);
         }
 
-        int winnerIndex = battleResolver.winningIndex(totals);
-        boolean userWon = winnerIndex == 0;
+        // Everyone on the same total is a draw (no winner). A partial tie is not:
+        // the normal highest-total / lowest-index selection still applies there.
+        boolean draw = battleResolver.isDraw(totals);
+        int winnerIndex = draw ? BattleResolver.DRAW_WINNER_INDEX : battleResolver.winningIndex(totals);
+        boolean userWon = !draw && winnerIndex == 0;
 
         // 5. Record the battle header (stable id for the debit reference and FKs).
         Battle battle = new Battle();
@@ -164,6 +173,16 @@ public class BotBattleService {
             newVpBalance = walletService.debit(accountId, entryCost, REASON_BATTLE_ENTRY, battleId).getVpBalance();
         } else {
             newVpBalance = walletService.getWalletForAccount(accountId).vpBalance();
+        }
+
+        // A draw returns the entry straight away. Charging first and refunding in
+        // the same transaction keeps the funds check and the ledger honest, and
+        // leaves newVpBalance as the post-refund balance the client will show.
+        long refundVp = 0L;
+        if (draw && entryCost > 0) {
+            refundVp = entryCost;
+            newVpBalance = walletService
+                    .credit(accountId, refundVp, REASON_BATTLE_DRAW_REFUND, battleId).getVpBalance();
         }
 
         // 7. Persist participants.
@@ -197,7 +216,7 @@ public class BotBattleService {
         }
         battleRollRepository.saveAll(rolls);
 
-        // 9. Grant every rolled skin to the user only on a win.
+        // 9. Grant every rolled skin to the user only on a win (never on a draw).
         List<String> grantedInventoryItemIds = new ArrayList<>();
         if (userWon) {
             for (BattleRoll roll : rolls) {
@@ -230,7 +249,9 @@ public class BotBattleService {
                 winnerIndex,
                 userWon,
                 grantedInventoryItemIds,
-                participantResponses
+                participantResponses,
+                draw,
+                refundVp
         );
     }
 

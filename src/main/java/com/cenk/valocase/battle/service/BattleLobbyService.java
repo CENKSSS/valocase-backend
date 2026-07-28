@@ -18,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import com.cenk.valocase.account.domain.Account;
 import com.cenk.valocase.account.repository.AccountRepository;
 import com.cenk.valocase.account.service.AccountService;
+import com.cenk.valocase.analytics.service.PlayerPresenceService;
 import com.cenk.valocase.battle.domain.Battle;
 import com.cenk.valocase.battle.domain.BattleLobby;
 import com.cenk.valocase.battle.domain.BattleLobbyCase;
@@ -73,7 +74,9 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>None of the battle economics are changed here: entry cost is still
  * {@code casePrice x rounds}, the winner is still the highest total VP (ties to
- * the lowest index), and only the winner receives every rolled skin.
+ * the lowest index), and only the winner receives every rolled skin. The one
+ * exception is a draw — every slot on the same total VP — which has no winner,
+ * grants nothing, and refunds each real player's entry instead.
  */
 @Service
 @RequiredArgsConstructor
@@ -84,6 +87,8 @@ public class BattleLobbyService {
     public static final String REASON_LOBBY_ENTRY = "BATTLE_LOBBY_ENTRY";
     /** Wallet reason for refunding a cancelled lobby's entry charge. */
     public static final String REASON_LOBBY_REFUND = "BATTLE_LOBBY_REFUND";
+    /** Wallet reason for returning the entry charge after a drawn battle. */
+    public static final String REASON_LOBBY_DRAW_REFUND = "BATTLE_LOBBY_DRAW_REFUND";
 
     /** Flat XP granted to each real participant once a battle completes (per battle, not per round). */
     public static final int PVP_BATTLE_XP = 5;
@@ -93,11 +98,19 @@ public class BattleLobbyService {
     /** A full lobby waits this long before the battle resolves. */
     public static final Duration START_DELAY = Duration.ofSeconds(1);
     /**
-     * A WAITING lobby that has not started within this window expires: the
-     * cleanup job cancels it, refunds every real participant once, and it stops
-     * appearing in the public list.
+     * A WAITING player-created lobby that has not started within this window
+     * expires: the cleanup job cancels it, refunds every real participant once,
+     * and it stops appearing in the public list. Kept short so a host whose lobby
+     * nobody joins gets their VP back quickly.
      */
-    public static final Duration LOBBY_TIMEOUT = Duration.ofMinutes(2);
+    public static final Duration LOBBY_TIMEOUT = Duration.ofSeconds(90);
+    /**
+     * The same expiry for a Free Lobby Event. It is longer than
+     * {@link #LOBBY_TIMEOUT} because an event lobby opens with no host at all —
+     * every slot has to be found and filled by players who were not already
+     * there — and because nobody is charged, so a longer window strands no VP.
+     */
+    public static final Duration EVENT_LOBBY_TIMEOUT = Duration.ofMinutes(3);
     /**
      * A real-player slot is "connected" if it was seen within this window. A
      * winner that is not connected at resolution receives no reward.
@@ -112,8 +125,20 @@ public class BattleLobbyService {
             UUID.fromString("00000000-0000-0000-0000-000000000001");
     /** {@code eventType} emitted for a Free Lobby Event so Unity can show a FREE card. */
     public static final String EVENT_TYPE_FREE = "FREE_LOBBY";
-    /** Cadence of the Free Lobby Event; also the window length used for the dedup key. */
-    public static final Duration EVENT_INTERVAL = Duration.ofDays(2);
+    /**
+     * Cadence of the Free Lobby Event while the game is busy. Also the window
+     * length used for the dedup key: it is the shortest gap two events can ever
+     * have, so flooring the clock to it always yields a distinct key per event.
+     */
+    public static final Duration EVENT_INTERVAL = Duration.ofMinutes(15);
+    /**
+     * Cadence used instead while fewer than {@link #EVENT_MIN_ONLINE_PLAYERS}
+     * players are online — a free lobby that nobody is around to fill is not
+     * worth spawning as often.
+     */
+    public static final Duration EVENT_INTERVAL_LOW_POPULATION = Duration.ofMinutes(30);
+    /** At or above this many online players the event runs at the fast cadence. */
+    public static final int EVENT_MIN_ONLINE_PLAYERS = 6;
     /** Participant slots of an event lobby (all start empty; real players fill them). */
     public static final int EVENT_LOBBY_SLOTS = 2;
 
@@ -142,6 +167,7 @@ public class BattleLobbyService {
     private final BattleLobbySlotRepository slotRepository;
     private final AccountRepository accountRepository;
     private final ProgressionService progressionService;
+    private final PlayerPresenceService playerPresenceService;
     private final ApplicationEventPublisher eventPublisher;
 
     // --- Create ----------------------------------------------------------------
@@ -252,18 +278,42 @@ public class BattleLobbyService {
     // --- Free Lobby Event (server-authoritative; never reachable from a client) -
 
     /**
-     * Creates one FREE (entry cost 0) public event lobby for the current 2-day
-     * window, if none exists yet. The lobby starts with only empty slots (no real
+     * Creates one FREE (entry cost 0) public event lobby if the current cadence
+     * says the next one is due. The lobby starts with only empty slots (no real
      * host), is owned by the {@link #SYSTEM_EVENT_ACCOUNT_ID system account}, and
-     * is marked {@code is_event}. The {@code event_window_key} UNIQUE constraint is
-     * the database-level guard: a concurrent insert from another instance collides
-     * and the {@code DataIntegrityViolationException} propagates to the caller, so
-     * at most one event lobby is ever created per window. A late run or restart
-     * within the same window finds the existing key and creates nothing.
+     * is marked {@code is_event}.
+     *
+     * <p>The cadence is measured from the previous event's creation time, not
+     * from a fixed clock grid, because it varies with how busy the game is (see
+     * {@link #currentEventInterval()}). It is re-evaluated on every call against
+     * the <em>absolute</em> time elapsed, which is never reset or partially
+     * consumed. Two properties follow, and both are deliberate:
+     *
+     * <ul>
+     *   <li>Time already waited always counts. A quiet game that fills up
+     *       mid-wait does not restart or top up its wait — it is due the moment
+     *       the elapsed time covers the faster cadence, immediately if that
+     *       already passed.</li>
+     *   <li>The wait is therefore always between {@link #EVENT_INTERVAL} and
+     *       {@link #EVENT_INTERVAL_LOW_POPULATION}, whatever the population does
+     *       in between. It can never sum to more than the slow cadence.</li>
+     * </ul>
+     *
+     * <p>The {@code event_window_key} UNIQUE constraint is the database-level
+     * guard: two instances that both find the event due collide on the same key,
+     * exactly one insert wins, and the loser's
+     * {@code DataIntegrityViolationException} propagates to the caller. The key
+     * floors the clock to {@link #EVENT_INTERVAL}, which is the shortest gap two
+     * events can have, so consecutive events never share a key.
      */
     @Transactional
     public java.util.Optional<UUID> createEventLobby() {
-        String windowKey = currentEventWindowKey(Instant.now());
+        Instant now = Instant.now();
+        Instant lastCreatedAt = lobbyRepository.latestEventLobbyCreatedAt().orElse(null);
+        if (lastCreatedAt != null && lastCreatedAt.plus(currentEventInterval()).isAfter(now)) {
+            return java.util.Optional.empty(); // not due yet at the current cadence
+        }
+        String windowKey = currentEventWindowKey(now);
         if (lobbyRepository.existsByEventWindowKey(windowKey)) {
             return java.util.Optional.empty();
         }
@@ -316,10 +366,21 @@ public class BattleLobbyService {
         return java.util.Optional.of(lobbyId);
     }
 
-    /** Stable dedup key for the 2-day window {@code now} falls in. */
+    /**
+     * How long to wait before the next Free Lobby Event. Fewer than
+     * {@link #EVENT_MIN_ONLINE_PLAYERS} players online means the game is quiet
+     * and the event slows to {@link #EVENT_INTERVAL_LOW_POPULATION}; otherwise it
+     * runs at {@link #EVENT_INTERVAL}.
+     */
+    private Duration currentEventInterval() {
+        long online = playerPresenceService.onlinePlayerCount();
+        return online < EVENT_MIN_ONLINE_PLAYERS ? EVENT_INTERVAL_LOW_POPULATION : EVENT_INTERVAL;
+    }
+
+    /** Stable dedup key for the {@link #EVENT_INTERVAL} window {@code now} falls in. */
     static String currentEventWindowKey(Instant now) {
         long windowSeconds = EVENT_INTERVAL.getSeconds();
-        long windowStart = (now.getEpochSecond() / windowSeconds) * windowSeconds;
+        long windowStart = Math.floorDiv(now.getEpochSecond(), windowSeconds) * windowSeconds;
         return "free-event-" + windowStart;
     }
 
@@ -332,7 +393,7 @@ public class BattleLobbyService {
             return List.of();
         }
         List<UUID> lobbyIds = lobbies.stream().map(BattleLobby::getId).toList();
-        Instant expiryCutoff = Instant.now().minus(LOBBY_TIMEOUT);
+        Instant now = Instant.now();
         Map<UUID, List<BattleLobbyCase>> casesByLobby = lobbyCaseRepository
                 .findByLobbyIdInOrderByOrdinalAsc(lobbyIds)
                 .stream().collect(Collectors.groupingBy(BattleLobbyCase::getLobbyId));
@@ -349,7 +410,7 @@ public class BattleLobbyService {
 
         List<LobbyResponse> out = new ArrayList<>(lobbies.size());
         for (BattleLobby lobby : lobbies) {
-            if (lobby.getCreatedAt().isBefore(expiryCutoff)) {
+            if (lobby.getCreatedAt().isBefore(now.minus(lobbyTimeout(lobby)))) {
                 continue;
             }
             List<BattleLobbySlot> slots = slotsByLobby.getOrDefault(lobby.getId(), List.of());
@@ -508,11 +569,12 @@ public class BattleLobbyService {
 
     // --- Maintenance: expiry cleanup + fallback start --------------------------
 
-    /** Ids of WAITING lobbies that have passed the timeout and should be cancelled. */
+    /** Ids of WAITING lobbies that have passed their own timeout and should be cancelled. */
     @Transactional(readOnly = true)
     public List<UUID> staleWaitingLobbyIds() {
-        Instant cutoff = Instant.now().minus(LOBBY_TIMEOUT);
-        return lobbyRepository.findByStatusAndCreatedAtBefore(LobbyStatus.WAITING, cutoff)
+        Instant now = Instant.now();
+        return lobbyRepository.findStaleByStatus(
+                        LobbyStatus.WAITING, now.minus(LOBBY_TIMEOUT), now.minus(EVENT_LOBBY_TIMEOUT))
                 .stream().map(BattleLobby::getId).toList();
     }
 
@@ -527,7 +589,7 @@ public class BattleLobbyService {
         if (lobby == null || lobby.getStatus() != LobbyStatus.WAITING) {
             return;
         }
-        if (lobby.getCreatedAt().isAfter(Instant.now().minus(LOBBY_TIMEOUT))) {
+        if (lobby.getCreatedAt().isAfter(Instant.now().minus(lobbyTimeout(lobby)))) {
             return;
         }
         log.debug("Cancelling stale lobby {} createdAt={}", lobbyId, lobby.getCreatedAt());
@@ -578,6 +640,14 @@ public class BattleLobbyService {
      * with {@link DropSelector}, picks the winner with {@link BattleResolver},
      * and grants every rolled skin to the winner — only if the winner is a real
      * player. A bot winner grants nothing (bots have no inventory or wallet).
+     *
+     * <p>When every slot ends on the same total VP the battle is a draw: the
+     * lobby still completes and still records its rolls, but no winner is stored
+     * ({@link BattleResolver#DRAW_WINNER_INDEX}), nothing is granted, and each
+     * real player's entry charge is returned. This method is the only place a
+     * draw refund happens and it runs under the caller's row lock behind the
+     * COMPLETED guard above, so a re-poll or a concurrent request can never
+     * refund twice.
      */
     private void resolve(BattleLobby lobby, List<BattleLobbySlot> slots) {
         if (lobby.getStatus() == LobbyStatus.COMPLETED) {
@@ -622,9 +692,12 @@ public class BattleLobbyService {
             rolledByParticipant.add(rolls);
         }
 
-        int winnerIndex = battleResolver.winningIndex(totals);
-        BattleLobbySlot winnerSlot = slots.get(winnerIndex);
-        boolean creatorWon = winnerSlot.isCreator();
+        // Everyone on the same total is a draw (no winner). A partial tie is not:
+        // the normal highest-total / lowest-index selection still applies there.
+        boolean draw = battleResolver.isDraw(totals);
+        int winnerIndex = draw ? BattleResolver.DRAW_WINNER_INDEX : battleResolver.winningIndex(totals);
+        BattleLobbySlot winnerSlot = draw ? null : slots.get(winnerIndex);
+        boolean creatorWon = winnerSlot != null && winnerSlot.isCreator();
 
         // Persist the immutable battle header into the existing table.
         Battle battle = new Battle();
@@ -669,7 +742,9 @@ public class BattleLobbyService {
         }
 
         // Winner-takes-all: every rolled skin goes to a real, connected winner.
-        if (winnerSlot.getSlotType() == SlotType.REAL
+        // A draw has no winner, so the rolls stay display-only and nothing is granted.
+        if (!draw
+                && winnerSlot.getSlotType() == SlotType.REAL
                 && winnerSlot.getAccountId() != null
                 && isConnected(winnerSlot, Instant.now())) {
             UUID winnerAccount = winnerSlot.getAccountId();
@@ -683,7 +758,10 @@ public class BattleLobbyService {
         }
         battleRollRepository.saveAll(rolls);
 
-        grantBattleXp(slots);
+        if (draw) {
+            refundDrawParticipants(lobby, slots);
+        }
+        grantBattleProgress(slots, draw);
 
         lobby.setStatus(LobbyStatus.COMPLETED);
         lobby.setWinnerSlotIndex(winnerIndex);
@@ -692,11 +770,29 @@ public class BattleLobbyService {
         lobbyRepository.save(lobby);
     }
 
-    private void grantBattleXp(List<BattleLobbySlot> slots) {
+    /**
+     * Returns each real player's actual entry charge after a draw. Bots pay
+     * nothing so they get nothing back, and a free (event) lobby charged 0, so
+     * this credits nobody there.
+     */
+    private void refundDrawParticipants(BattleLobby lobby, List<BattleLobbySlot> slots) {
+        for (BattleLobbySlot slot : slots) {
+            if (slot.getSlotType() == SlotType.REAL && slot.getAccountId() != null && slot.getChargedVp() > 0) {
+                walletService.credit(
+                        slot.getAccountId(), slot.getChargedVp(), REASON_LOBBY_DRAW_REFUND, lobby.getId());
+            }
+        }
+    }
+
+    /** Grants each real player their battle XP and counts the battle as played. */
+    private void grantBattleProgress(List<BattleLobbySlot> slots, boolean draw) {
         for (BattleLobbySlot slot : slots) {
             if (slot.getSlotType() == SlotType.REAL && slot.getAccountId() != null) {
-                accountRepository.findById(slot.getAccountId())
-                        .ifPresent(account -> progressionService.grantCaseOpenXp(account, PVP_BATTLE_XP));
+                // A draw awards no XP; it still counts as a battle played.
+                if (!draw) {
+                    accountRepository.findById(slot.getAccountId())
+                            .ifPresent(account -> progressionService.grantCaseOpenXp(account, PVP_BATTLE_XP));
+                }
                 eventPublisher.publishEvent(
                         new MissionProgressEvent(slot.getAccountId(), MissionEventTypes.BATTLE_PLAYED, 1));
             }
@@ -742,6 +838,16 @@ public class BattleLobbyService {
             return null;
         }
         return AccountService.resolveAvatarId(slot.getAvatarId());
+    }
+
+    /**
+     * How long this lobby may sit WAITING before it expires. Event lobbies get
+     * the longer window; everything a player created gets the short one. Every
+     * expiry decision goes through here so the list view, the cleanup sweep and
+     * the locked re-check can never disagree about when a lobby died.
+     */
+    private static Duration lobbyTimeout(BattleLobby lobby) {
+        return lobby.isEvent() ? EVENT_LOBBY_TIMEOUT : LOBBY_TIMEOUT;
     }
 
     /** A real slot seen within the connection window counts as connected. */
@@ -853,9 +959,15 @@ public class BattleLobbyService {
             winnerRewarded = battleRolls.stream().anyMatch(r -> r.getGrantedInventoryItemId() != null);
         }
 
+        // A drawn lobby stores the sentinel winner index, so no slot below matches
+        // and both winner display fields stay null — exactly what the client needs
+        // to skip winner resolution entirely.
+        boolean draw = isDrawResult(lobby);
+
         List<LobbySlotResponse> slotResponses = new ArrayList<>(slots.size());
         String winnerDisplayName = null;
         String winnerAvatarId = null;
+        long refundVp = 0L;
         for (BattleLobbySlot slot : slots) {
             boolean addBotAllowed = slot.getSlotType() == SlotType.EMPTY && addBotWindowOpen;
             boolean connected = switch (slot.getSlotType()) {
@@ -883,6 +995,11 @@ public class BattleLobbyService {
             if (lobby.getWinnerSlotIndex() != null && lobby.getWinnerSlotIndex() == slot.getSlotIndex()) {
                 winnerDisplayName = slotDisplayName;
                 winnerAvatarId = slotAvatarId;
+            }
+            // refundVp is per-viewer: only the requesting player's own refund.
+            if (draw && slot.getSlotType() == SlotType.REAL && viewerAccountId != null
+                    && viewerAccountId.equals(slot.getAccountId())) {
+                refundVp = slot.getChargedVp();
             }
         }
 
@@ -917,8 +1034,22 @@ public class BattleLobbyService {
                 winnerAvatarId,
                 winnerRewarded,
                 lobby.isEvent(),
-                lobby.isEvent() ? EVENT_TYPE_FREE : null
+                lobby.isEvent() ? EVENT_TYPE_FREE : null,
+                draw,
+                refundVp
         );
+    }
+
+    /**
+     * True once a lobby has completed with no winner. The sentinel winner index
+     * is the stored form of a draw: it matches no slot, so every winner-by-index
+     * read (this mapping, the leaderboard and the analytics queries) already
+     * treats a draw as "nobody won" without a schema change.
+     */
+    private static boolean isDrawResult(BattleLobby lobby) {
+        return lobby.getStatus() == LobbyStatus.COMPLETED
+                && lobby.getWinnerSlotIndex() != null
+                && lobby.getWinnerSlotIndex() == BattleResolver.DRAW_WINNER_INDEX;
     }
 
     private List<CaseSelectionResponse> buildCaseSelections(BattleLobby lobby,

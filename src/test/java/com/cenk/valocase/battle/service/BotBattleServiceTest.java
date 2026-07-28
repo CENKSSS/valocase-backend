@@ -44,6 +44,7 @@ import com.cenk.valocase.common.exception.ApiException;
 import com.cenk.valocase.inventory.domain.InventoryItem;
 import com.cenk.valocase.inventory.service.InventoryService;
 import com.cenk.valocase.wallet.domain.Wallet;
+import com.cenk.valocase.wallet.dto.WalletResponse;
 import com.cenk.valocase.wallet.service.InsufficientFundsException;
 import com.cenk.valocase.wallet.service.WalletService;
 
@@ -243,5 +244,59 @@ class BotBattleServiceTest {
         assertEquals(1, result.winnerIndex());
         assertTrue(result.grantedInventoryItemIds().isEmpty());
         verify(inventoryService, never()).addItem(any(), any(), any(), any());
+        assertFalse(result.isDraw());
+        assertEquals(0L, result.refundVp());
+    }
+
+    @Test
+    void draw_refundsEntry_grantsNothing_andReportsNoWinner() {
+        stubActivePool();
+        when(battleResolver.isDraw(any())).thenReturn(true);
+        Wallet charged = new Wallet();
+        charged.setVpBalance(9800L);
+        when(walletService.debit(eq(ACCOUNT), eq(200L), any(), any())).thenReturn(charged);
+        Wallet refunded = new Wallet();
+        refunded.setVpBalance(10000L);
+        when(walletService.credit(eq(ACCOUNT), eq(200L), eq(BotBattleService.REASON_BATTLE_DRAW_REFUND), any()))
+                .thenReturn(refunded);
+
+        BattleResultResponse result = service.createAndResolve(ACCOUNT, "Tester", "avatar_1", CASE_ID, 2, 2);
+
+        assertTrue(result.isDraw());
+        assertEquals(BattleResolver.DRAW_WINNER_INDEX, result.winnerIndex());
+        assertFalse(result.userWon());
+        assertEquals(200L, result.entryCost());
+        assertEquals(200L, result.refundVp());
+        // newVpBalance is the post-refund balance, not the post-charge one.
+        assertEquals(10000L, result.newVpBalance());
+        assertTrue(result.grantedInventoryItemIds().isEmpty());
+        verify(inventoryService, never()).addItem(any(), any(), any(), any());
+        // A draw never asks for a winner.
+        verify(battleResolver, never()).winningIndex(any());
+    }
+
+    @Test
+    void draw_freeCase_completesWithoutChargeOrRefund() {
+        when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(true, 0)));
+        when(caseEntryRepository.findByCaseIdOrderBySkinIdAsc(CASE_ID)).thenReturn(List.of(entry("skin_a")));
+        when(skinRepository.findAllById(any())).thenReturn(List.of(skin("skin_a", 1000, true)));
+        when(dropSelector.selectWeighted(any())).thenReturn(entry("skin_a"));
+        when(battleRepository.saveAndFlush(any(Battle.class))).thenAnswer(inv -> {
+            Battle b = inv.getArgument(0);
+            b.setId(UUID.randomUUID());
+            return b;
+        });
+        when(battleResolver.isDraw(any())).thenReturn(true);
+        when(walletService.getWalletForAccount(ACCOUNT))
+                .thenReturn(new WalletResponse(ACCOUNT.toString(), 10000L, 0L, null, null));
+
+        BattleResultResponse result = service.createAndResolve(ACCOUNT, "Tester", "avatar_1", CASE_ID, 2, 2);
+
+        assertTrue(result.isDraw());
+        assertEquals(0L, result.entryCost());
+        assertEquals(0L, result.refundVp());
+        assertEquals(10000L, result.newVpBalance());
+        verify(walletService, never()).credit(any(), anyLong(), any(), any());
+        verify(walletService, never()).debit(any(), anyLong(), any(), any());
     }
 }
