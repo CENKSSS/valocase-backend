@@ -64,6 +64,17 @@ diamond balance has no ledger (only VP does); diamond changes are out of scope.
 - `admin_battle_analytics` - per-user battle stats (lobby + bot battles,
   de-duplicated the same way as the leaderboard)
 - `admin_upgrade_analytics` - per-user upgrade stats
+- `admin_daily_players` - one row per player per day: name, session count,
+  minutes played, whether they registered that day (added by V78)
+- `admin_daily_summary` - one row per day: how many players, how many of them
+  new, total and average minutes (added by V78)
+
+The two daily views group by **Istanbul** day, not UTC, and attribute a session
+entirely to the day it started — a session crossing midnight counts once, on its
+starting day. Their `estimated_minutes` inherits the accuracy limits described
+above (time after a player's last request is not counted);
+`active_foreground_minutes` is exact but only for clients reporting the V76
+session lifecycle.
 
 Accounts are guest-only: there is no email anywhere in the system, so views
 expose `username` (the display name). The system event account
@@ -118,6 +129,24 @@ ORDER BY battles_joined DESC;
 SELECT * FROM admin_upgrade_analytics
 WHERE has_ever_upgraded
 ORDER BY upgrade_attempts DESC;
+
+-- 9a. Today: who played, for how long (the everyday question).
+SELECT username, level, session_count, estimated_minutes, is_new_user,
+       first_session_at, last_activity_at
+FROM admin_daily_players
+WHERE day = (now() AT TIME ZONE 'Europe/Istanbul')::date
+ORDER BY estimated_minutes DESC;
+
+-- 9b. Today in one line: player count, new players, total minutes.
+SELECT * FROM admin_daily_summary
+WHERE day = (now() AT TIME ZONE 'Europe/Istanbul')::date;
+
+-- 9c. Last 30 days, one row per day.
+SELECT * FROM admin_daily_summary ORDER BY day DESC LIMIT 30;
+
+-- 9d. One player's day-by-day history.
+SELECT day, session_count, estimated_minutes
+FROM admin_daily_players WHERE username = 'AgentAB12' ORDER BY day DESC;
 
 -- 10. Daily active users (last 30 days, from authenticated sessions).
 SELECT (started_at AT TIME ZONE 'Europe/Istanbul')::date AS day,
