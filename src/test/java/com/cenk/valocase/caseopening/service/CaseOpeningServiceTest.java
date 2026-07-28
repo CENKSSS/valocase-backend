@@ -170,8 +170,9 @@ class CaseOpeningServiceTest {
         assertEquals(15, result.progression().level());
         assertEquals(1355L, result.progression().totalXp());
         assertEquals(5, result.progression().currentLevelXp());
-        assertEquals(0, result.progression().xpRequiredForNextLevel());
-        assertEquals(true, result.progression().maxLevelReached());
+        // Levelling continues past 15, so the XP bar always has a positive span.
+        assertEquals(100, result.progression().xpRequiredForNextLevel());
+        assertEquals(false, result.progression().maxLevelReached());
 
         verify(walletService).debit(ACCOUNT_ID, 500L, CaseOpeningService.REASON_CASE_OPEN, openingId);
         verify(inventoryService).addItem(ACCOUNT_ID, skinId, InventoryService.SOURCE_CASE_OPENING, openingId);

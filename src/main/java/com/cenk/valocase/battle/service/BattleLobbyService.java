@@ -211,7 +211,11 @@ public class BattleLobbyService {
                 throw new ApiException(HttpStatus.BAD_REQUEST, "Duplicate case selected: " + caseId);
             }
             CaseDefinition caseDef = requireActiveCase(caseId);
-            requireCategoryUnlocked(caseId, creator.getLevel());
+            // Derive the level from total XP like every other gate does. The
+            // accounts.level column is only a cache of that value and can be
+            // stale (an old row, or a hand-edited one), so reading it directly
+            // would gate lobbies on a different level than case opening does.
+            requireCategoryUnlocked(caseId, progressionService.levelOf(creator));
             caseById.put(caseId, caseDef);
             entryCost += (long) caseDef.getPriceVp() * quantity;
             totalRounds += quantity;

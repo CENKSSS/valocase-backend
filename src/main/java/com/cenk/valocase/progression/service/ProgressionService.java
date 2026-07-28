@@ -15,8 +15,29 @@ import com.cenk.valocase.progression.dto.ProgressionView;
  *
  * <p>Total XP is the single source of truth; level is always derived from it via
  * {@link #LEVEL_THRESHOLDS}. A successful case opening grants
- * {@value #XP_PER_CASE_OPEN} XP. Level is capped at {@link #MAX_LEVEL}; XP earned
- * beyond the max-level threshold is preserved but does not raise the level.
+ * {@value #XP_PER_CASE_OPEN} XP.
+ *
+ * <p><strong>There is no maximum level.</strong> The threshold table covers
+ * levels 1..{@link #MAX_UNLOCK_LEVEL}, which is where the last case category
+ * unlocks; past that a player keeps levelling every
+ * {@value #XP_PER_LEVEL_BEYOND_TABLE} XP, gaining levels but unlocking nothing
+ * new (everything is already open at {@link #MAX_UNLOCK_LEVEL}). Because there
+ * is always a next level, {@code xpRequiredForNextLevel} is always positive and
+ * {@code maxLevelReached} is always false.
+ *
+ * <p><strong>{@code accounts.level} and {@code accounts.current_level_xp} are
+ * caches, not inputs.</strong> Both are recomputed from {@code total_xp} on every
+ * read and rewritten on every grant, so editing them by hand — in SQL or
+ * anywhere else — changes nothing the player sees and is silently overwritten by
+ * the next XP grant. To move a player to level N, set {@code total_xp} to that
+ * level's threshold (see {@link #totalXpForLevel(int)}) and let the derived
+ * columns follow:
+ *
+ * <pre>{@code
+ * -- level 10 = 860 total XP (thresholds below)
+ * UPDATE accounts SET total_xp = 860, level = 10, current_level_xp = 0
+ * WHERE id = '<account-id>';
+ * }</pre>
  */
 @Service
 public class ProgressionService {
@@ -46,11 +67,30 @@ public class ProgressionService {
             1350  // level 15
     };
 
-    /** Highest attainable level for now. */
-    public static final int MAX_LEVEL = LEVEL_THRESHOLDS.length;
+    /**
+     * Last level covered by {@link #LEVEL_THRESHOLDS} and the last level at which
+     * anything unlocks — {@link CaseCategory#MELEE}, the final category, opens
+     * here. Levelling does not stop at this point; nothing new simply unlocks
+     * beyond it.
+     */
+    public static final int MAX_UNLOCK_LEVEL = LEVEL_THRESHOLDS.length;
 
-    /** Level derived from a total-XP value, capped at {@link #MAX_LEVEL}. */
+    /**
+     * Flat XP cost of every level past {@link #MAX_UNLOCK_LEVEL}, continuing the
+     * roughly 100-XP steps the table ends on. There is no maximum level: a player
+     * keeps levelling for as long as they keep earning XP.
+     */
+    public static final long XP_PER_LEVEL_BEYOND_TABLE = 100L;
+
+    /** Level derived from a total-XP value. Uncapped past {@link #MAX_UNLOCK_LEVEL}. */
     public int levelForXp(long totalXp) {
+        long lastTableThreshold = LEVEL_THRESHOLDS[MAX_UNLOCK_LEVEL - 1];
+        if (totalXp >= lastTableThreshold) {
+            // Long arithmetic then a clamp, so even a corrupted total_xp cannot
+            // overflow the int level.
+            long beyond = (totalXp - lastTableThreshold) / XP_PER_LEVEL_BEYOND_TABLE;
+            return (int) Math.min(MAX_UNLOCK_LEVEL + beyond, Integer.MAX_VALUE);
+        }
         int level = 1;
         for (int i = 1; i < LEVEL_THRESHOLDS.length; i++) {
             if (totalXp >= LEVEL_THRESHOLDS[i]) {
@@ -62,9 +102,57 @@ public class ProgressionService {
         return level;
     }
 
+    /** Cumulative total XP required to reach {@code level}, for any level ≥ 1. */
+    private static long thresholdForLevel(int level) {
+        if (level <= MAX_UNLOCK_LEVEL) {
+            return LEVEL_THRESHOLDS[level - 1];
+        }
+        return LEVEL_THRESHOLDS[MAX_UNLOCK_LEVEL - 1]
+                + (long) (level - MAX_UNLOCK_LEVEL) * XP_PER_LEVEL_BEYOND_TABLE;
+    }
+
+    /**
+     * XP span of {@code level} — what it costs to reach the next one. Always
+     * positive. Expressed as a span rather than "threshold of level + 1" so the
+     * arithmetic cannot overflow at the very top of the int range.
+     */
+    private static long levelSpan(int level) {
+        if (level < MAX_UNLOCK_LEVEL) {
+            return LEVEL_THRESHOLDS[level] - LEVEL_THRESHOLDS[level - 1];
+        }
+        return XP_PER_LEVEL_BEYOND_TABLE;
+    }
+
     /** Level of an account, derived from its total XP (source of truth). */
     public int levelOf(Account account) {
         return levelForXp(account.getTotalXp());
+    }
+
+    /**
+     * Total XP a player must hold to sit exactly at the start of {@code level}.
+     * This is the value to write into {@code total_xp} when moving an account to
+     * a level by hand; writing the level column alone has no effect. Levels above
+     * {@link #MAX_UNLOCK_LEVEL} are valid — they just unlock nothing new.
+     *
+     * @throws IllegalArgumentException if the level is below 1
+     */
+    public long totalXpForLevel(int level) {
+        if (level < 1) {
+            throw new IllegalArgumentException("level must be at least 1: " + level);
+        }
+        return thresholdForLevel(level);
+    }
+
+    /**
+     * Rewrites the cached {@code level} / {@code current_level_xp} columns from
+     * the account's total XP without granting anything. Use after a manual
+     * {@code total_xp} edit to make the stored row agree with what the player
+     * sees; every read already derives these values, so this only keeps the
+     * database itself honest.
+     */
+    public void resyncDerivedFields(Account account) {
+        long totalXp = account.getTotalXp();
+        applyDerivedFields(account, totalXp, levelForXp(totalXp));
     }
 
     /** Player level at which the given category unlocks. */
@@ -138,17 +226,18 @@ public class ProgressionService {
     private void applyDerivedFields(Account account, long totalXp, int level) {
         account.setTotalXp(totalXp);
         account.setLevel(level);
-        account.setCurrentLevelXp((int) (totalXp - LEVEL_THRESHOLDS[level - 1]));
+        account.setCurrentLevelXp((int) (totalXp - thresholdForLevel(level)));
     }
 
     private LevelState levelState(long totalXp, int level) {
-        long currentThreshold = LEVEL_THRESHOLDS[level - 1];
-        boolean maxLevelReached = level >= MAX_LEVEL;
-        long nextThreshold = maxLevelReached ? currentThreshold : LEVEL_THRESHOLDS[level];
+        long currentThreshold = thresholdForLevel(level);
+        long nextThreshold = currentThreshold + levelSpan(level);
         int currentLevelXp = (int) (totalXp - currentThreshold);
-        int xpRequiredForNextLevel = maxLevelReached ? 0 : (int) (nextThreshold - currentThreshold);
-        return new LevelState(
-                currentLevelXp, xpRequiredForNextLevel, currentThreshold, nextThreshold, maxLevelReached);
+        // There is no maximum level, so there is always a next one and the XP
+        // needed for it is always positive — a client dividing by this value can
+        // never hit a zero.
+        int xpRequiredForNextLevel = (int) (nextThreshold - currentThreshold);
+        return new LevelState(currentLevelXp, xpRequiredForNextLevel, currentThreshold, nextThreshold, false);
     }
 
     /** Categories whose unlock level falls in {@code (fromLevel, toLevel]}. */

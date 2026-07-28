@@ -24,6 +24,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -97,6 +98,15 @@ class BattleLobbyServiceTest {
     @Mock private ApplicationEventPublisher eventPublisher;
 
     @InjectMocks private BattleLobbyService service;
+
+    @BeforeEach
+    void stubLevelDerivation() {
+        // Lobby creation derives the level from total XP through ProgressionService
+        // rather than reading the cached accounts.level column. Mirror the test
+        // account's level field so the isCategoryUnlocked expectations still match.
+        when(progressionService.levelOf(any(Account.class)))
+                .thenAnswer(inv -> inv.<Account>getArgument(0).getLevel());
+    }
 
     private static final UUID CREATOR = UUID.randomUUID();
     private static final UUID JOINER = UUID.randomUUID();
@@ -177,6 +187,25 @@ class BattleLobbyServiceTest {
         assertEquals(1, res.filledSlots());
         assertEquals(2, res.slots().size());
         verify(walletService).debit(eq(CREATOR), eq(200L), any(), eq(LOBBY));
+    }
+
+    @Test
+    void create_gatesOnXpDerivedLevel_notTheCachedLevelColumn() {
+        // The stored column says level 1, but total XP puts the player at 50.
+        // Case unlock must follow the derived value, like case opening does.
+        Account stale = account(CREATOR, 1);
+        when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(100)));
+        when(accountRepository.findById(CREATOR)).thenReturn(Optional.of(stale));
+        when(progressionService.levelOf(stale)).thenReturn(50);
+        when(progressionService.isCategoryUnlocked(eq(50), any(CaseCategory.class))).thenReturn(true);
+        stubLobbySave();
+        when(walletService.debit(eq(CREATOR), eq(200L), any(), any())).thenReturn(new Wallet());
+
+        LobbyResponse res = service.createLobby(CREATOR, List.of(new CaseSelectionRequest(CASE_ID, 2)), 2);
+
+        assertEquals(LobbyStatus.WAITING.name(), res.status());
+        verify(progressionService).isCategoryUnlocked(eq(50), any(CaseCategory.class));
+        verify(progressionService, never()).isCategoryUnlocked(eq(1), any(CaseCategory.class));
     }
 
     @Test

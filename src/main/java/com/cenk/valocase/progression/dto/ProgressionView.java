@@ -7,10 +7,13 @@ import java.util.List;
  * responses so the client can render level, XP bar and unlocked categories.
  *
  * @param currentLevelXp            XP progress within the current level
- * @param xpRequiredForNextLevel    XP span of the current level (0 at max level)
+ * @param xpRequiredForNextLevel    XP span of the current level; always positive,
+ *                                  since there is no maximum level, so it is safe
+ *                                  to divide by when drawing the XP bar
  * @param currentLevelXpThreshold   total XP at which the current level began
  * @param nextLevelXpThreshold      total XP required to reach the next level
- * @param maxLevelReached           whether the player is at the maximum level
+ * @param maxLevelReached           always false — levelling never stops. Kept so
+ *                                  existing clients still parse the response
  */
 public record ProgressionView(
         int level,
