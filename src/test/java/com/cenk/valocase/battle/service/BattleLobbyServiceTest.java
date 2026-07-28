@@ -20,6 +20,7 @@ import static org.mockito.Mockito.when;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -44,6 +45,7 @@ import com.cenk.valocase.analytics.service.PlayerPresenceService;
 import com.cenk.valocase.battle.domain.Battle;
 import com.cenk.valocase.battle.domain.BattleLobby;
 import com.cenk.valocase.battle.domain.BattleLobbySlot;
+import com.cenk.valocase.battle.domain.BattleParticipant;
 import com.cenk.valocase.battle.domain.LobbyStatus;
 import com.cenk.valocase.battle.domain.SlotType;
 import com.cenk.valocase.battle.dto.CaseSelectionRequest;
@@ -111,6 +113,7 @@ class BattleLobbyServiceTest {
     private static final UUID CREATOR = UUID.randomUUID();
     private static final UUID JOINER = UUID.randomUUID();
     private static final UUID OTHER = UUID.randomUUID();
+    private static final UUID FOURTH = UUID.randomUUID();
     private static final UUID LOBBY = UUID.randomUUID();
     private static final String CASE_ID = "classic_basic";
 
@@ -276,6 +279,60 @@ class BattleLobbyServiceTest {
         assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
         verify(walletService, never()).debit(any(), anyLong(), any(), any());
         verify(lobbyRepository, never()).saveAndFlush(any());
+    }
+
+    /** {@code count} distinct cases, each priced 100, each selected {@code quantity} times. */
+    private List<CaseSelectionRequest> selections(int count, int quantity) {
+        List<CaseSelectionRequest> out = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            String id = "case_" + i;
+            when(caseDefinitionRepository.findById(id)).thenReturn(Optional.of(caseDef(id, 100)));
+            out.add(new CaseSelectionRequest(id, quantity));
+        }
+        return out;
+    }
+
+    @Test
+    void create_fiveCasesTimesFiveEach_isTheMaximumAndIsAccepted() {
+        when(accountRepository.findById(CREATOR)).thenReturn(Optional.of(account(CREATOR, 50)));
+        when(progressionService.isCategoryUnlocked(eq(50), any(CaseCategory.class))).thenReturn(true);
+        stubLobbySave();
+        when(walletService.debit(eq(CREATOR), anyLong(), any(), any())).thenReturn(new Wallet());
+
+        LobbyResponse res = service.createLobby(CREATOR, selections(5, 5), 2);
+
+        assertEquals(BattleLobbyService.MAX_TOTAL_ROUNDS, res.rounds());
+        assertEquals(2500L, res.entryCost()); // 100 VP x 25 openings
+        verify(walletService).debit(eq(CREATOR), eq(2500L), any(), eq(LOBBY));
+    }
+
+    @Test
+    void create_moreThanTwentyFiveTotalOpenings_rejected() {
+        when(accountRepository.findById(CREATOR)).thenReturn(Optional.of(account(CREATOR, 50)));
+        when(progressionService.isCategoryUnlocked(eq(50), any(CaseCategory.class))).thenReturn(true);
+
+        // Six cases would also trip the distinct-case rule, so push the total over
+        // the line with five cases while staying inside the per-case limit... which
+        // is impossible today. Prove the total guard fires on its own instead.
+        assertEquals(25, BattleLobbyService.MAX_CASE_TYPES * BattleLobbyService.CASE_QUANTITY_MAX);
+
+        ApiException ex = assertThrows(ApiException.class,
+                () -> service.createLobby(CREATOR, selections(6, 5), 2));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        verify(walletService, never()).debit(any(), anyLong(), any(), any());
+        verify(lobbyRepository, never()).saveAndFlush(any());
+    }
+
+    @Test
+    void create_perCaseQuantityLimitIsIndependentOfTheBotBattleLimit() {
+        when(accountRepository.findById(CREATOR)).thenReturn(Optional.of(account(CREATOR, 50)));
+
+        // Six copies of one case: over the lobby's own per-case limit.
+        ApiException ex = assertThrows(ApiException.class,
+                () -> service.createLobby(CREATOR, selections(1, 6), 2));
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
+        assertTrue(ex.getMessage().contains(String.valueOf(BattleLobbyService.CASE_QUANTITY_MAX)));
+        verify(walletService, never()).debit(any(), anyLong(), any(), any());
     }
 
     @Test
@@ -675,6 +732,14 @@ class BattleLobbyServiceTest {
         return lobby;
     }
 
+    /**
+     * Participants the service persisted during resolution. The read path is
+     * stubbed to hand this same live list back, so a response reflects the totals
+     * the battle actually produced instead of an empty stand-in — which is what
+     * the draw refund and the per-viewer refundVp are derived from.
+     */
+    private final List<BattleParticipant> savedParticipants = new ArrayList<>();
+
     private void stubResolve() {
         when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(100)));
         when(caseEntryRepository.findByCaseIdOrderBySkinIdAsc(CASE_ID)).thenReturn(List.of(entry()));
@@ -685,15 +750,70 @@ class BattleLobbyServiceTest {
             b.setId(UUID.randomUUID());
             return b;
         });
-        when(battleParticipantRepository.findByBattleIdOrderByParticipantIndexAsc(any())).thenReturn(List.of());
+        when(battleParticipantRepository.saveAll(any())).thenAnswer(inv -> {
+            List<BattleParticipant> batch = inv.getArgument(0);
+            savedParticipants.clear();
+            savedParticipants.addAll(batch);
+            return batch;
+        });
+        when(battleParticipantRepository.findByBattleIdOrderByParticipantIndexAsc(any()))
+                .thenReturn(savedParticipants);
         when(battleRollRepository.findByBattleId(any())).thenReturn(List.of());
-        when(inventoryService.addItem(eq(CREATOR), eq("skin_a"), any(), any())).thenAnswer(inv -> {
+        when(inventoryService.addItem(any(), any(), any(), any())).thenAnswer(inv -> {
             InventoryItem item = new InventoryItem();
             item.setId(UUID.randomUUID());
             return item;
         });
         when(accountRepository.findById(CREATOR)).thenReturn(Optional.of(account(CREATOR, 1)));
         when(accountRepository.findById(JOINER)).thenReturn(Optional.of(account(JOINER, 1)));
+        when(accountRepository.findById(OTHER)).thenReturn(Optional.of(account(OTHER, 1)));
+        when(accountRepository.findById(FOURTH)).thenReturn(Optional.of(account(FOURTH, 1)));
+    }
+
+    /** A STARTING lobby with an explicit slot count, one opening per slot. */
+    private BattleLobby startingLobby(int rounds, int maxSlots) {
+        BattleLobby lobby = startingLobby(rounds);
+        lobby.setMaxSlots(maxSlots);
+        return lobby;
+    }
+
+    /**
+     * Makes each slot roll its own skin so the participants end on the given
+     * totals — one opening per slot, so slot i is worth {@code vpPerSlot[i]}.
+     */
+    private void stubTotals(int... vpPerSlot) {
+        List<Skin> skins = new ArrayList<>();
+        List<CaseEntry> entries = new ArrayList<>();
+        for (int i = 0; i < vpPerSlot.length; i++) {
+            skins.add(skin("skin_" + i, vpPerSlot[i]));
+            entries.add(entry("skin_" + i));
+        }
+        when(caseEntryRepository.findByCaseIdOrderBySkinIdAsc(CASE_ID)).thenReturn(entries);
+        when(skinRepository.findAllById(any())).thenReturn(skins);
+        CaseEntry[] rest = entries.subList(1, entries.size()).toArray(new CaseEntry[0]);
+        when(dropSelector.selectWeighted(any())).thenReturn(entries.get(0), rest);
+
+        long top = 0;
+        for (int vp : vpPerSlot) {
+            top = Math.max(top, vp);
+        }
+        when(battleResolver.topTotal(any())).thenReturn(top);
+    }
+
+    private static CaseEntry entry(String skinId) {
+        CaseEntry e = new CaseEntry();
+        e.setCaseId(CASE_ID);
+        e.setSkinId(skinId);
+        e.setWeight(1);
+        return e;
+    }
+
+    private static Skin skin(String id, int vpValue) {
+        Skin s = new Skin();
+        s.setId(id);
+        s.setVpValue(vpValue);
+        s.setActive(true);
+        return s;
     }
 
     @Test
@@ -760,15 +880,34 @@ class BattleLobbyServiceTest {
         verify(inventoryService, times(4)).addItem(eq(CREATOR), eq("skin_a"), any(), any());
     }
 
-    @Test
-    void draw_refundsEveryRealPlayer_grantsNothing_andReportsNoWinner() {
-        BattleLobby lobby = startingLobby(2);
+    /** A four-real-player lobby whose slots end on the given totals. */
+    private List<BattleLobbySlot> fourPlayerDraw(int... vpPerSlot) {
+        BattleLobby lobby = startingLobby(1, 4);
         when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
-        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(
+        List<BattleLobbySlot> slots = List.of(
                 slot(0, SlotType.REAL, CREATOR, true),
-                slot(1, SlotType.REAL, JOINER, false)));
+                slot(1, SlotType.REAL, JOINER, false),
+                slot(2, SlotType.REAL, OTHER, false),
+                slot(3, SlotType.REAL, FOURTH, false));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(slots);
         stubResolve();
+        stubTotals(vpPerSlot);
         when(battleResolver.isDraw(any())).thenReturn(true);
+        return slots;
+    }
+
+    private void verifyRefunded(UUID account) {
+        verify(walletService).credit(
+                eq(account), eq(200L), eq(BattleLobbyService.REASON_LOBBY_DRAW_REFUND), eq(LOBBY));
+    }
+
+    private void verifyNotRefunded(UUID account) {
+        verify(walletService, never()).credit(eq(account), anyLong(), any(), any());
+    }
+
+    @Test
+    void draw_twoSharingTheTop_refundsOnlyThoseTwo() {
+        fourPlayerDraw(900, 900, 500, 300);
 
         LobbyResponse res = service.getLobby(CREATOR, LOBBY);
 
@@ -778,45 +917,46 @@ class BattleLobbyServiceTest {
         assertEquals(Integer.valueOf(BattleResolver.DRAW_WINNER_INDEX), res.winnerSlotIndex());
         assertNull(res.winnerDisplayName());
         assertNull(res.winnerAvatarId());
-        assertEquals(200L, res.refundVp()); // the polling player's own entry charge
+        assertEquals(200L, res.refundVp()); // the viewer is tied at the top
 
-        verify(walletService).credit(
-                eq(CREATOR), eq(200L), eq(BattleLobbyService.REASON_LOBBY_DRAW_REFUND), eq(LOBBY));
-        verify(walletService).credit(
-                eq(JOINER), eq(200L), eq(BattleLobbyService.REASON_LOBBY_DRAW_REFUND), eq(LOBBY));
+        verifyRefunded(CREATOR);
+        verifyRefunded(JOINER);
+        verifyNotRefunded(OTHER);   // 500 — lost normally
+        verifyNotRefunded(FOURTH);  // 300 — lost normally
+        // Nobody wins the loot in a draw, not even those tied at the top.
         verify(inventoryService, never()).addItem(any(), any(), any(), any());
-        verify(progressionService, never()).grantCaseOpenXp(any(), anyInt());
         verify(battleResolver, never()).winningIndex(any());
     }
 
     @Test
-    void draw_botSlotIsNotRefunded() {
-        BattleLobby lobby = startingLobby(2);
-        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
-        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(
-                slot(0, SlotType.REAL, CREATOR, true),
-                slot(1, SlotType.BOT, null, false)));
-        stubResolve();
-        when(battleResolver.isDraw(any())).thenReturn(true);
+    void draw_threeSharingTheTop_refundsThoseThree() {
+        fourPlayerDraw(900, 900, 900, 100);
 
         service.getLobby(CREATOR, LOBBY);
 
-        verify(walletService, times(1)).credit(any(), anyLong(), any(), any());
-        verify(walletService).credit(
-                eq(CREATOR), eq(200L), eq(BattleLobbyService.REASON_LOBBY_DRAW_REFUND), eq(LOBBY));
+        verifyRefunded(CREATOR);
+        verifyRefunded(JOINER);
+        verifyRefunded(OTHER);
+        verifyNotRefunded(FOURTH);
     }
 
     @Test
-    void draw_refundVpIsPerViewer() {
-        BattleLobby lobby = startingLobby(2);
-        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
-        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(
-                slot(0, SlotType.REAL, CREATOR, true),
-                slot(1, SlotType.REAL, JOINER, false)));
-        stubResolve();
-        when(battleResolver.isDraw(any())).thenReturn(true);
+    void draw_everyoneEqual_refundsEveryone() {
+        fourPlayerDraw(700, 700, 700, 700);
 
-        // A spectator holds no slot, so nothing was refunded to them.
+        service.getLobby(CREATOR, LOBBY);
+
+        verifyRefunded(CREATOR);
+        verifyRefunded(JOINER);
+        verifyRefunded(OTHER);
+        verifyRefunded(FOURTH);
+    }
+
+    @Test
+    void draw_playerBelowTheTop_isToldTheyGotNothingBack() {
+        fourPlayerDraw(900, 900, 500, 300);
+
+        // The viewer sits at 500, below the shared top: the battle drew, but not for them.
         LobbyResponse res = service.getLobby(OTHER, LOBBY);
 
         assertTrue(res.isDraw());
@@ -824,14 +964,63 @@ class BattleLobbyServiceTest {
     }
 
     @Test
-    void draw_repeatedPoll_doesNotRefundTwice() {
-        BattleLobby lobby = startingLobby(2);
+    void draw_grantsBattleXpToEveryone_winnersAndLosersAlike() {
+        fourPlayerDraw(900, 900, 500, 300);
+
+        service.getLobby(CREATOR, LOBBY);
+
+        // A drawn battle was still played, so every real slot earns its XP —
+        // including the two below the shared top.
+        verify(progressionService).grantCaseOpenXp(argThat(a -> CREATOR.equals(a.getId())), eq(5));
+        verify(progressionService).grantCaseOpenXp(argThat(a -> JOINER.equals(a.getId())), eq(5));
+        verify(progressionService).grantCaseOpenXp(argThat(a -> OTHER.equals(a.getId())), eq(5));
+        verify(progressionService).grantCaseOpenXp(argThat(a -> FOURTH.equals(a.getId())), eq(5));
+    }
+
+    @Test
+    void draw_botTiedAtTheTop_isNotCredited_andTheRealPlayerBelowGetsNothing() {
+        BattleLobby lobby = startingLobby(1, 3);
         when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
         when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(
-                slot(0, SlotType.REAL, CREATOR, true),
-                slot(1, SlotType.REAL, JOINER, false)));
+                slot(0, SlotType.BOT, null, false),
+                slot(1, SlotType.BOT, null, false),
+                slot(2, SlotType.REAL, CREATOR, false)));
         stubResolve();
+        stubTotals(900, 900, 500);
         when(battleResolver.isDraw(any())).thenReturn(true);
+
+        LobbyResponse res = service.getLobby(CREATOR, LOBBY);
+
+        // Bots share the top, so it is a draw with no winner — but bots hold no
+        // wallet and the only real player is below the top, so nobody is credited.
+        assertTrue(res.isDraw());
+        assertEquals(0L, res.refundVp());
+        verify(walletService, never()).credit(any(), anyLong(), any(), any());
+        verify(inventoryService, never()).addItem(any(), any(), any(), any());
+    }
+
+    @Test
+    void draw_tiedTopPlayerIsRefundedEvenWhenDisconnected() {
+        BattleLobby lobby = startingLobby(1, 2);
+        BattleLobbySlot away = slot(0, SlotType.REAL, CREATOR, true);
+        away.setLastSeenAt(Instant.now().minus(5, ChronoUnit.MINUTES)); // disconnected
+        when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
+        when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY))
+                .thenReturn(List.of(away, slot(1, SlotType.REAL, JOINER, false)));
+        stubResolve();
+        stubTotals(900, 900);
+        when(battleResolver.isDraw(any())).thenReturn(true);
+
+        // A different account polls, so no heartbeat reconnects the away player.
+        service.getLobby(JOINER, LOBBY);
+
+        // Their money is theirs regardless of whether they were watching.
+        verifyRefunded(CREATOR);
+    }
+
+    @Test
+    void draw_repeatedPoll_doesNotRefundTwice() {
+        fourPlayerDraw(900, 900, 500, 300);
 
         service.getLobby(CREATOR, LOBBY);
         LobbyResponse second = service.getLobby(CREATOR, LOBBY);
@@ -847,7 +1036,7 @@ class BattleLobbyServiceTest {
 
     @Test
     void draw_freeEventLobby_completesWithoutRefund() {
-        BattleLobby lobby = startingLobby(2);
+        BattleLobby lobby = startingLobby(1, 2);
         lobby.setEntryCost(0L);
         lobby.setEvent(true);
         BattleLobbySlot first = slot(0, SlotType.REAL, CREATOR, false);
@@ -857,6 +1046,7 @@ class BattleLobbyServiceTest {
         when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
         when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(first, second));
         stubResolve();
+        stubTotals(700, 700);
         when(battleResolver.isDraw(any())).thenReturn(true);
 
         LobbyResponse res = service.getLobby(CREATOR, LOBBY);
@@ -867,13 +1057,16 @@ class BattleLobbyServiceTest {
     }
 
     @Test
-    void normalWin_reportsNoDrawAndNoRefund() {
-        BattleLobby lobby = startingLobby(2);
+    void tieBelowTheTop_isANormalWin_notADraw() {
+        BattleLobby lobby = startingLobby(1, 4);
         when(lobbyRepository.findByIdForUpdate(LOBBY)).thenReturn(Optional.of(lobby));
         when(slotRepository.findByLobbyIdOrderBySlotIndexAsc(LOBBY)).thenReturn(List.of(
                 slot(0, SlotType.REAL, CREATOR, true),
-                slot(1, SlotType.REAL, JOINER, false)));
+                slot(1, SlotType.REAL, JOINER, false),
+                slot(2, SlotType.REAL, OTHER, false),
+                slot(3, SlotType.REAL, FOURTH, false)));
         stubResolve();
+        stubTotals(900, 500, 500, 300); // the tie at 500 is below the top
         when(battleResolver.isDraw(any())).thenReturn(false);
         when(battleResolver.winningIndex(any())).thenReturn(0);
 

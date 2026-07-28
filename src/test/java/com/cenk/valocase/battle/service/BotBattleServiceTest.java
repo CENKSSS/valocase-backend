@@ -249,9 +249,12 @@ class BotBattleServiceTest {
     }
 
     @Test
-    void draw_refundsEntry_grantsNothing_andReportsNoWinner() {
+    void draw_userTiedAtTop_refundsEntry_grantsNothing_andReportsNoWinner() {
         stubActivePool();
         when(battleResolver.isDraw(any())).thenReturn(true);
+        // stubActivePool rolls skin_a (1000 VP) every time, so 2 rounds = 2000
+        // for everyone: the user is one of the participants sharing the top.
+        when(battleResolver.topTotal(any())).thenReturn(2000L);
         Wallet charged = new Wallet();
         charged.setVpBalance(9800L);
         when(walletService.debit(eq(ACCOUNT), eq(200L), any(), any())).thenReturn(charged);
@@ -276,6 +279,41 @@ class BotBattleServiceTest {
     }
 
     @Test
+    void draw_betweenBotsAboveTheUser_leavesTheUserWithNothingBack() {
+        // Two bots share the top at 900; the user is below at 500. The battle is
+        // a draw with no winner, but it is not the user's draw — they lost it.
+        when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(true, 100)));
+        when(caseEntryRepository.findByCaseIdOrderBySkinIdAsc(CASE_ID))
+                .thenReturn(List.of(entry("skin_lo"), entry("skin_hi")));
+        when(skinRepository.findAllById(any()))
+                .thenReturn(List.of(skin("skin_lo", 500, true), skin("skin_hi", 900, true)));
+        when(dropSelector.selectWeighted(any()))
+                .thenReturn(entry("skin_lo"), entry("skin_hi"), entry("skin_hi"));
+        when(battleRepository.saveAndFlush(any(Battle.class))).thenAnswer(inv -> {
+            Battle b = inv.getArgument(0);
+            b.setId(UUID.randomUUID());
+            return b;
+        });
+        when(battleResolver.isDraw(any())).thenReturn(true);
+        when(battleResolver.topTotal(any())).thenReturn(900L);
+        Wallet charged = new Wallet();
+        charged.setVpBalance(9900L);
+        when(walletService.debit(eq(ACCOUNT), eq(100L), any(), any())).thenReturn(charged);
+
+        BattleResultResponse result = service.createAndResolve(ACCOUNT, "Tester", "avatar_1", CASE_ID, 1, 3);
+
+        assertTrue(result.isDraw());
+        assertEquals(BattleResolver.DRAW_WINNER_INDEX, result.winnerIndex());
+        assertFalse(result.userWon());
+        assertEquals(0L, result.refundVp());
+        // The entry stays spent, so the balance is the post-charge one.
+        assertEquals(9900L, result.newVpBalance());
+        assertTrue(result.grantedInventoryItemIds().isEmpty());
+        verify(walletService, never()).credit(any(), anyLong(), any(), any());
+        verify(inventoryService, never()).addItem(any(), any(), any(), any());
+    }
+
+    @Test
     void draw_freeCase_completesWithoutChargeOrRefund() {
         when(caseDefinitionRepository.findById(CASE_ID)).thenReturn(Optional.of(caseDef(true, 0)));
         when(caseEntryRepository.findByCaseIdOrderBySkinIdAsc(CASE_ID)).thenReturn(List.of(entry("skin_a")));
@@ -287,6 +325,7 @@ class BotBattleServiceTest {
             return b;
         });
         when(battleResolver.isDraw(any())).thenReturn(true);
+        when(battleResolver.topTotal(any())).thenReturn(2000L);
         when(walletService.getWalletForAccount(ACCOUNT))
                 .thenReturn(new WalletResponse(ACCOUNT.toString(), 10000L, 0L, null, null));
 

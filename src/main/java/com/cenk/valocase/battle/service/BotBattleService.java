@@ -49,9 +49,11 @@ import lombok.RequiredArgsConstructor;
  * all rolled skins to the user only on a win. Any failure rolls back the charge,
  * the records, and any grants together.
  *
- * <p>If every participant ends on the same total VP the battle is a draw: there
- * is no winner, nothing is granted, and the entry charge is returned inside the
- * same transaction — so the reported balance is already the post-refund one.
+ * <p>If two or more participants share the highest total the battle is a draw:
+ * there is no winner and nothing is granted. The entry charge comes back only
+ * when the user is one of those tied at the top — two bots tying above them is
+ * still a draw, but one the user lost. The refund runs inside the same
+ * transaction, so the reported balance is already the post-refund one.
  */
 @Service
 @RequiredArgsConstructor
@@ -148,11 +150,16 @@ public class BotBattleService {
             rolledByParticipant.add(rolls);
         }
 
-        // Everyone on the same total is a draw (no winner). A partial tie is not:
-        // the normal highest-total / lowest-index selection still applies there.
+        // Two or more participants sharing the highest total is a draw, and it
+        // covers only them. A tie below the top changes nothing.
+        long topTotal = battleResolver.topTotal(totals);
         boolean draw = battleResolver.isDraw(totals);
         int winnerIndex = draw ? BattleResolver.DRAW_WINNER_INDEX : battleResolver.winningIndex(totals);
         boolean userWon = !draw && winnerIndex == 0;
+        // The user is only owed their entry back when they are one of the tied
+        // participants. Two bots tying above the user is still a draw, but the
+        // user lost it and keeps nothing back.
+        boolean userTiedAtTop = draw && totals[0] == topTotal;
 
         // 5. Record the battle header (stable id for the debit reference and FKs).
         Battle battle = new Battle();
@@ -179,7 +186,7 @@ public class BotBattleService {
         // the same transaction keeps the funds check and the ledger honest, and
         // leaves newVpBalance as the post-refund balance the client will show.
         long refundVp = 0L;
-        if (draw && entryCost > 0) {
+        if (userTiedAtTop && entryCost > 0) {
             refundVp = entryCost;
             newVpBalance = walletService
                     .credit(accountId, refundVp, REASON_BATTLE_DRAW_REFUND, battleId).getVpBalance();

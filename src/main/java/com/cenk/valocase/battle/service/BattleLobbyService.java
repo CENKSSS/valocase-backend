@@ -75,8 +75,9 @@ import lombok.extern.slf4j.Slf4j;
  * <p>None of the battle economics are changed here: entry cost is still
  * {@code casePrice x rounds}, the winner is still the highest total VP (ties to
  * the lowest index), and only the winner receives every rolled skin. The one
- * exception is a draw — every slot on the same total VP — which has no winner,
- * grants nothing, and refunds each real player's entry instead.
+ * exception is a draw — two or more slots sharing the highest total — which has
+ * no winner, grants nothing, and returns the entry only to those tied at the
+ * top. Slots below the top lost normally and get nothing back.
  */
 @Service
 @RequiredArgsConstructor
@@ -119,6 +120,17 @@ public class BattleLobbyService {
 
     /** A lobby may select at most this many distinct cases. */
     public static final int MAX_CASE_TYPES = 5;
+    /** Fewest copies of a single case a lobby may open. */
+    public static final int CASE_QUANTITY_MIN = 1;
+    /** Most copies of a single case a lobby may open. */
+    public static final int CASE_QUANTITY_MAX = 5;
+    /**
+     * Most openings a lobby may run in total, summed across every selected case.
+     * Stated explicitly rather than left to fall out of
+     * {@link #MAX_CASE_TYPES} × {@link #CASE_QUANTITY_MAX}: raising either of
+     * those must not silently raise the length of a battle as a side effect.
+     */
+    public static final int MAX_TOTAL_ROUNDS = 25;
 
     /** Fixed, disabled system account that owns Free Lobby Events (see V71 migration). */
     public static final UUID SYSTEM_EVENT_ACCOUNT_ID =
@@ -201,11 +213,10 @@ public class BattleLobbyService {
             if (caseId == null || caseId.isBlank()) {
                 throw new ApiException(HttpStatus.BAD_REQUEST, "caseId is required for every selection");
             }
-            if (quantity == null
-                    || quantity < BotBattleService.ROUNDS_MIN || quantity > BotBattleService.ROUNDS_MAX) {
+            if (quantity == null || quantity < CASE_QUANTITY_MIN || quantity > CASE_QUANTITY_MAX) {
                 throw new ApiException(HttpStatus.BAD_REQUEST,
-                        "quantity must be between " + BotBattleService.ROUNDS_MIN
-                                + " and " + BotBattleService.ROUNDS_MAX + " for case " + caseId);
+                        "quantity must be between " + CASE_QUANTITY_MIN
+                                + " and " + CASE_QUANTITY_MAX + " for case " + caseId);
             }
             if (caseById.containsKey(caseId)) {
                 throw new ApiException(HttpStatus.BAD_REQUEST, "Duplicate case selected: " + caseId);
@@ -219,6 +230,13 @@ public class BattleLobbyService {
             caseById.put(caseId, caseDef);
             entryCost += (long) caseDef.getPriceVp() * quantity;
             totalRounds += quantity;
+        }
+
+        // Guard the battle's length in its own right. Every selection can be
+        // individually valid and still add up to a longer battle than intended.
+        if (totalRounds < 1 || totalRounds > MAX_TOTAL_ROUNDS) {
+            throw new ApiException(HttpStatus.BAD_REQUEST,
+                    "Total openings must be between 1 and " + MAX_TOTAL_ROUNDS + ": " + totalRounds);
         }
 
         String primaryCaseId = selections.get(0).caseId();
@@ -645,13 +663,13 @@ public class BattleLobbyService {
      * and grants every rolled skin to the winner — only if the winner is a real
      * player. A bot winner grants nothing (bots have no inventory or wallet).
      *
-     * <p>When every slot ends on the same total VP the battle is a draw: the
-     * lobby still completes and still records its rolls, but no winner is stored
-     * ({@link BattleResolver#DRAW_WINNER_INDEX}), nothing is granted, and each
-     * real player's entry charge is returned. This method is the only place a
-     * draw refund happens and it runs under the caller's row lock behind the
-     * COMPLETED guard above, so a re-poll or a concurrent request can never
-     * refund twice.
+     * <p>When two or more slots share the highest total the battle is a draw:
+     * the lobby still completes and still records its rolls, but no winner is
+     * stored ({@link BattleResolver#DRAW_WINNER_INDEX}), nothing is granted to
+     * anyone, and the entry charge is returned only to the real players tied at
+     * the top. This method is the only place a draw refund happens and it runs
+     * under the caller's row lock behind the COMPLETED guard above, so a re-poll
+     * or a concurrent request can never refund twice.
      */
     private void resolve(BattleLobby lobby, List<BattleLobbySlot> slots) {
         if (lobby.getStatus() == LobbyStatus.COMPLETED) {
@@ -696,8 +714,10 @@ public class BattleLobbyService {
             rolledByParticipant.add(rolls);
         }
 
-        // Everyone on the same total is a draw (no winner). A partial tie is not:
-        // the normal highest-total / lowest-index selection still applies there.
+        // Two or more slots sharing the highest total is a draw, and it covers
+        // only those slots. A tie below the top changes nothing: the normal
+        // highest-total / lowest-index selection still applies there.
+        long topTotal = battleResolver.topTotal(totals);
         boolean draw = battleResolver.isDraw(totals);
         int winnerIndex = draw ? BattleResolver.DRAW_WINNER_INDEX : battleResolver.winningIndex(totals);
         BattleLobbySlot winnerSlot = draw ? null : slots.get(winnerIndex);
@@ -763,9 +783,9 @@ public class BattleLobbyService {
         battleRollRepository.saveAll(rolls);
 
         if (draw) {
-            refundDrawParticipants(lobby, slots);
+            refundTiedTopParticipants(lobby, slots, totals, topTotal);
         }
-        grantBattleProgress(slots, draw);
+        grantBattleXp(slots);
 
         lobby.setStatus(LobbyStatus.COMPLETED);
         lobby.setWinnerSlotIndex(winnerIndex);
@@ -775,13 +795,19 @@ public class BattleLobbyService {
     }
 
     /**
-     * Returns each real player's actual entry charge after a draw. Bots pay
-     * nothing so they get nothing back, and a free (event) lobby charged 0, so
-     * this credits nobody there.
+     * Returns the entry charge to every real player tied at the top of a draw.
+     * Slots below the top lost normally and keep nothing back. Bots pay nothing
+     * so there is nothing to return to them even when they hold the top, and a
+     * free (event) lobby charged 0, so this credits nobody there.
      */
-    private void refundDrawParticipants(BattleLobby lobby, List<BattleLobbySlot> slots) {
-        for (BattleLobbySlot slot : slots) {
-            if (slot.getSlotType() == SlotType.REAL && slot.getAccountId() != null && slot.getChargedVp() > 0) {
+    private void refundTiedTopParticipants(BattleLobby lobby, List<BattleLobbySlot> slots,
+            long[] totals, long topTotal) {
+        for (int i = 0; i < slots.size(); i++) {
+            BattleLobbySlot slot = slots.get(i);
+            if (totals[i] == topTotal
+                    && slot.getSlotType() == SlotType.REAL
+                    && slot.getAccountId() != null
+                    && slot.getChargedVp() > 0) {
                 walletService.credit(
                         slot.getAccountId(), slot.getChargedVp(), REASON_LOBBY_DRAW_REFUND, lobby.getId());
             }
@@ -789,14 +815,11 @@ public class BattleLobbyService {
     }
 
     /** Grants each real player their battle XP and counts the battle as played. */
-    private void grantBattleProgress(List<BattleLobbySlot> slots, boolean draw) {
+    private void grantBattleXp(List<BattleLobbySlot> slots) {
         for (BattleLobbySlot slot : slots) {
             if (slot.getSlotType() == SlotType.REAL && slot.getAccountId() != null) {
-                // A draw awards no XP; it still counts as a battle played.
-                if (!draw) {
-                    accountRepository.findById(slot.getAccountId())
-                            .ifPresent(account -> progressionService.grantCaseOpenXp(account, PVP_BATTLE_XP));
-                }
+                accountRepository.findById(slot.getAccountId())
+                        .ifPresent(account -> progressionService.grantCaseOpenXp(account, PVP_BATTLE_XP));
                 eventPublisher.publishEvent(
                         new MissionProgressEvent(slot.getAccountId(), MissionEventTypes.BATTLE_PLAYED, 1));
             }
@@ -965,8 +988,14 @@ public class BattleLobbyService {
 
         // A drawn lobby stores the sentinel winner index, so no slot below matches
         // and both winner display fields stay null — exactly what the client needs
-        // to skip winner resolution entirely.
+        // to skip winner resolution entirely. Only the slots tied at the top were
+        // refunded, so the persisted totals decide who is owed what; they are the
+        // same numbers the client uses to mark the drawn panels.
         boolean draw = isDrawResult(lobby);
+        long topTotal = participantByIndex.values().stream()
+                .mapToLong(BattleParticipant::getTotalVp)
+                .max()
+                .orElse(Long.MIN_VALUE);
 
         List<LobbySlotResponse> slotResponses = new ArrayList<>(slots.size());
         String winnerDisplayName = null;
@@ -1000,9 +1029,11 @@ public class BattleLobbyService {
                 winnerDisplayName = slotDisplayName;
                 winnerAvatarId = slotAvatarId;
             }
-            // refundVp is per-viewer: only the requesting player's own refund.
+            // refundVp is per-viewer: the requesting player's own refund, and only
+            // when they were tied at the top. A viewer below the top lost normally.
             if (draw && slot.getSlotType() == SlotType.REAL && viewerAccountId != null
-                    && viewerAccountId.equals(slot.getAccountId())) {
+                    && viewerAccountId.equals(slot.getAccountId())
+                    && totalVp != null && totalVp == topTotal) {
                 refundVp = slot.getChargedVp();
             }
         }

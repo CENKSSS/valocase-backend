@@ -35,7 +35,7 @@ class BattleResolverTest {
     @Test
     void everyoneEqual_isDraw() {
         assertTrue(resolver.isDraw(new long[]{300, 300}));
-        assertTrue(resolver.isDraw(new long[]{300, 300, 300, 300}));
+        assertTrue(resolver.isDraw(new long[]{700, 700, 700, 700}));
     }
 
     @Test
@@ -44,10 +44,28 @@ class BattleResolverTest {
     }
 
     @Test
-    void partialTieAtTheTop_isNotDraw() {
-        // 2 of 4 share the top total -> normal winner selection, not a draw.
-        assertFalse(resolver.isDraw(new long[]{5000, 3000, 5000, 3000}));
-        assertEquals(0, resolver.winningIndex(new long[]{5000, 3000, 5000, 3000}));
+    void twoSharingTheTop_isDraw() {
+        // 900/900/500/300 -> the two at 900 draw; the rest simply lost.
+        assertTrue(resolver.isDraw(new long[]{900, 900, 500, 300}));
+        assertEquals(900, resolver.topTotal(new long[]{900, 900, 500, 300}));
+    }
+
+    @Test
+    void threeSharingTheTop_isDraw() {
+        assertTrue(resolver.isDraw(new long[]{900, 900, 900, 100}));
+        assertEquals(900, resolver.topTotal(new long[]{900, 900, 900, 100}));
+    }
+
+    @Test
+    void twoSharingTheTopInAThreeWayLobby_isDraw() {
+        assertTrue(resolver.isDraw(new long[]{800, 800, 200}));
+    }
+
+    @Test
+    void tieBelowTheTop_isNotDraw() {
+        // 900/500/500/300 -> one clear winner; the tie at 500 is irrelevant.
+        assertFalse(resolver.isDraw(new long[]{900, 500, 500, 300}));
+        assertEquals(0, resolver.winningIndex(new long[]{900, 500, 500, 300}));
     }
 
     @Test
@@ -59,5 +77,12 @@ class BattleResolverTest {
     void singleParticipant_isNotDraw() {
         assertFalse(resolver.isDraw(new long[]{300}));
         assertFalse(resolver.isDraw(new long[]{}));
+    }
+
+    @Test
+    void topTotal_findsTheHighestWhereverItSits() {
+        assertEquals(300, resolver.topTotal(new long[]{100, 300, 200}));
+        assertEquals(100, resolver.topTotal(new long[]{100}));
+        assertEquals(0, resolver.topTotal(new long[]{0, 0}));
     }
 }

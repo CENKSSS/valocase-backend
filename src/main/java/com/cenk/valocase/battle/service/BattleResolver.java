@@ -5,13 +5,19 @@ import org.springframework.stereotype.Component;
 /**
  * Decides the outcome of a battle from per-participant totals.
  *
- * <p>A battle is a <em>draw</em> when every participant ends on the exact same
- * total VP. A draw has no winner at all: nothing is granted and each real player
- * gets their entry cost back. A partial tie is not a draw — if two of four
- * participants share the top total the normal winner selection still applies.
+ * <p>A battle is a <em>draw</em> when two or more participants share the highest
+ * total VP. The draw covers only those tied at the top: they have no winner
+ * between them and each real player among them gets their entry back. Everyone
+ * below the top simply lost, exactly as they would have without the tie — a tie
+ * further down the table changes nothing, so {@code 900/500/500/300} is a normal
+ * win for the first participant.
  *
- * <p>When there is a winner, the highest total VP wins; ties are broken by the
- * lowest participant index (so the user at index 0 wins ties).
+ * <p>Bots count toward the top like any other participant, so two bots tying at
+ * the top is still a draw with no winner. They have no wallet, so nothing is
+ * credited to them; clients derive who drew from the totals themselves.
+ *
+ * <p>When the top is held by exactly one participant, that participant wins.
+ * {@link #winningIndex(long[])} is only meaningful in that case.
  */
 @Component
 public class BattleResolver {
@@ -24,20 +30,38 @@ public class BattleResolver {
     public static final int DRAW_WINNER_INDEX = -1;
 
     /**
+     * Highest total among the participants — the value that decides both the
+     * winner and who is covered by a draw.
+     *
      * @param totals total VP per participant, indexed by participant index
-     * @return true when there are at least 2 participants and all of them share
-     *         the same total
+     * @return the highest total, or {@link Long#MIN_VALUE} when there are none
+     */
+    public long topTotal(long[] totals) {
+        long top = Long.MIN_VALUE;
+        for (long total : totals) {
+            if (total > top) {
+                top = total;
+            }
+        }
+        return top;
+    }
+
+    /**
+     * @param totals total VP per participant, indexed by participant index
+     * @return true when two or more participants share {@link #topTotal(long[])}
      */
     public boolean isDraw(long[] totals) {
         if (totals.length < 2) {
             return false;
         }
-        for (int i = 1; i < totals.length; i++) {
-            if (totals[i] != totals[0]) {
-                return false;
+        long top = topTotal(totals);
+        int atTop = 0;
+        for (long total : totals) {
+            if (total == top) {
+                atTop++;
             }
         }
-        return true;
+        return atTop >= 2;
     }
 
     /**
