@@ -51,18 +51,31 @@ public class AccountService {
     private final WalletService walletService;
     private final PlayerActivityService playerActivityService;
 
+    /**
+     * Creates a guest account under the nickname the player has already chosen.
+     *
+     * <p>The nickname is required, and that requirement is the account-creation
+     * guard rather than a formality. This endpoint is unauthenticated and hands
+     * out {@value #STARTING_VP} VP, so an empty POST used to be enough to mint an
+     * account — which is exactly how a fleet of unused accounts appeared. Only a
+     * client that has walked a player through the nickname screen can send one,
+     * so a bare request now creates nothing.
+     *
+     * <p>The name is validated before any write, so a rejected request leaves no
+     * account, no wallet and no starting balance behind.
+     */
     @Transactional
-    public GuestRegisterResponse registerGuest() {
+    public GuestRegisterResponse registerGuest(String rawDisplayName) {
+        String displayName = requireValidDisplayName(rawDisplayName);
         Instant now = Instant.now();
 
         Account account = new Account();
         account.setGuestToken(UUID.randomUUID());
+        account.setDisplayName(displayName);
+        account.setAvatarId(DEFAULT_AVATAR_ID);
         account.setStatus(AccountStatus.ACTIVE);
         account.setCreatedAt(now);
         account.setLastSeenAt(now);
-        account = accountRepository.save(account);
-        account.setDisplayName(defaultDisplayName(account.getId()));
-        account.setAvatarId(DEFAULT_AVATAR_ID);
         account = accountRepository.save(account);
 
         Wallet wallet = walletService.createInitialWallet(account.getId(), STARTING_VP);
@@ -82,6 +95,21 @@ public class AccountService {
 
     @Transactional
     public AccountProfileResponse updateDisplayName(Account account, String rawDisplayName) {
+        account.setDisplayName(requireValidDisplayName(rawDisplayName));
+        accountRepository.save(account);
+        return new AccountProfileResponse(account.getId().toString(), account.getDisplayName());
+    }
+
+    /**
+     * Validates and normalises a player-chosen nickname. Registration and later
+     * renames share this so a name that is legal at sign-up can never be illegal
+     * afterwards, or the reverse.
+     *
+     * @return the trimmed name
+     * @throws ApiException 400 if it is missing, the wrong length, or has
+     *                      characters outside letters, digits and underscore
+     */
+    private String requireValidDisplayName(String rawDisplayName) {
         if (rawDisplayName == null || rawDisplayName.isBlank()) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "displayName is required");
         }
@@ -95,9 +123,7 @@ public class AccountService {
             throw new ApiException(HttpStatus.BAD_REQUEST,
                     "displayName may only contain letters, numbers and underscore");
         }
-        account.setDisplayName(trimmed);
-        accountRepository.save(account);
-        return new AccountProfileResponse(account.getId().toString(), account.getDisplayName());
+        return trimmed;
     }
 
     @Transactional

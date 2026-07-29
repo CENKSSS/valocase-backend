@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RestController;
 import com.cenk.valocase.account.domain.Account;
 import com.cenk.valocase.account.dto.AccountAvatarResponse;
 import com.cenk.valocase.account.dto.AccountProfileResponse;
+import com.cenk.valocase.account.dto.GuestRegisterRequest;
 import com.cenk.valocase.account.dto.GuestRegisterResponse;
 import com.cenk.valocase.account.dto.UpdateAvatarRequest;
 import com.cenk.valocase.account.dto.UpdateDisplayNameRequest;
@@ -28,13 +29,18 @@ public class AccountController {
     private final AccountService accountService;
 
     /**
-     * Creates a new guest account with a fresh wallet and starting VP.
-     * Returns the guestToken the client must persist and send back.
+     * Creates a new guest account with a fresh wallet and starting VP, under the
+     * nickname the player already chose. Returns the guestToken the client must
+     * persist and send back.
+     *
+     * <p>The nickname is required. A request without a usable one is rejected
+     * with 400 and creates nothing at all.
      */
     @PostMapping("/guest")
     @ResponseStatus(HttpStatus.CREATED)
-    public GuestRegisterResponse registerGuest() {
-        return accountService.registerGuest();
+    public GuestRegisterResponse registerGuest(
+            @RequestBody(required = false) GuestRegisterRequest request) {
+        return accountService.registerGuest(request == null ? null : request.displayName());
     }
 
     /** Saves the player's chosen nickname as the account display name. */

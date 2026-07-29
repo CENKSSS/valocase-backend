@@ -48,18 +48,39 @@ Response `200`:
 ### POST /api/v1/guest
 No auth. Creates a guest account + wallet with starting VP (10000).
 
-Request: no body.
+Request body is **required**, and carries the nickname the player already chose:
+
+```json
+{ "displayName": "Cenk" }
+```
+
+Register only after the player has confirmed a nickname. The requirement is the
+account-creation guard, not a formality: this endpoint is unauthenticated and
+grants the starting balance, so a bare `{}` used to be enough to create an
+account. Clients from 1.0.18 onward send the name; anything older cannot
+register at all.
+
+`displayName` rules — identical to the rename endpoint, so a name that is legal
+here can never be illegal later:
+
+- 3–20 characters, surrounding whitespace trimmed
+- letters, digits and underscore only (`^[A-Za-z0-9_]+$`)
 
 Response `201`:
 ```json
 {
   "accountId": "f1c2...uuid",
   "guestToken": "a9b8...uuid",
-  "displayName": null,
+  "displayName": "Cenk",
+  "avatarId": "avatar_1",
   "status": "ACTIVE",
-  "vpBalance": 10000
+  "vpBalance": 10000,
+  "diamondBalance": 0
 }
 ```
+
+`400` when `displayName` is missing or breaks the rules above. Nothing is
+written: no account, no wallet, no starting balance.
 
 ### GET /api/v1/wallet
 Auth required (`X-Guest-Token`). Current VP balance.
