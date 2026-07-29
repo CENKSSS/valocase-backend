@@ -1548,21 +1548,21 @@ class BattleLobbyServiceTest {
     }
 
     @Test
-    void createEventLobby_quietGame_waitsThirtyMinutes() {
+    void createEventLobby_quietGame_waitsOutTheSlowCadence() {
         when(playerPresenceService.onlinePlayerCount()).thenReturn(5L);
+        // Hours past the fast cadence, still nowhere near the low-population one.
         when(lobbyRepository.latestEventLobbyCreatedAt())
-                .thenReturn(Optional.of(Instant.now().minus(20, ChronoUnit.MINUTES)));
+                .thenReturn(Optional.of(Instant.now().minus(6, ChronoUnit.HOURS)));
 
-        // 20 minutes is past the fast cadence but short of the low-population one.
         assertTrue(service.createEventLobby().isEmpty());
         verify(lobbyRepository, never()).saveAndFlush(any());
     }
 
     @Test
-    void createEventLobby_quietGame_createsAfterThirtyMinutes() {
+    void createEventLobby_quietGame_createsOnceTheSlowCadenceElapses() {
         when(playerPresenceService.onlinePlayerCount()).thenReturn(0L);
-        when(lobbyRepository.latestEventLobbyCreatedAt())
-                .thenReturn(Optional.of(Instant.now().minus(31, ChronoUnit.MINUTES)));
+        when(lobbyRepository.latestEventLobbyCreatedAt()).thenReturn(Optional.of(
+                Instant.now().minus(BattleLobbyService.EVENT_INTERVAL_LOW_POPULATION).minusSeconds(1)));
         stubEventCreation();
 
         assertTrue(service.createEventLobby().isPresent());
@@ -1570,11 +1570,11 @@ class BattleLobbyServiceTest {
 
     @Test
     void createEventLobby_quietGameThatFillsUp_becomesDueImmediately() {
-        // Waited 20 minutes under the slow cadence, then players arrived: the
-        // cadence is re-read every run, so the event is due now, not at 30.
+        // Six hours into the slow wait, players arrive. The cadence is re-read
+        // every run, so the event is due at once — not a day later.
         when(playerPresenceService.onlinePlayerCount()).thenReturn(8L);
         when(lobbyRepository.latestEventLobbyCreatedAt())
-                .thenReturn(Optional.of(Instant.now().minus(20, ChronoUnit.MINUTES)));
+                .thenReturn(Optional.of(Instant.now().minus(6, ChronoUnit.HOURS)));
         stubEventCreation();
 
         assertTrue(service.createEventLobby().isPresent());

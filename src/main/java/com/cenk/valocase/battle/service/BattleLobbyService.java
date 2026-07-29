@@ -145,10 +145,15 @@ public class BattleLobbyService {
     public static final Duration EVENT_INTERVAL = Duration.ofMinutes(15);
     /**
      * Cadence used instead while fewer than {@link #EVENT_MIN_ONLINE_PLAYERS}
-     * players are online — a free lobby that nobody is around to fill is not
-     * worth spawning as often.
+     * players are online — a free lobby needs two players to fill it, so on a
+     * quiet game it is worth almost nothing and is spawned once a day rather
+     * than repeatedly.
+     *
+     * <p>Being long does not make the wait rigid: the cadence is re-read on
+     * every check against absolute elapsed time, so as soon as enough players
+     * arrive the event is due after {@link #EVENT_INTERVAL}, not after a day.
      */
-    public static final Duration EVENT_INTERVAL_LOW_POPULATION = Duration.ofMinutes(30);
+    public static final Duration EVENT_INTERVAL_LOW_POPULATION = Duration.ofDays(1);
     /** At or above this many online players the event runs at the fast cadence. */
     public static final int EVENT_MIN_ONLINE_PLAYERS = 6;
     /** Participant slots of an event lobby (all start empty; real players fill them). */
