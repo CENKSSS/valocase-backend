@@ -29,7 +29,7 @@ import lombok.RequiredArgsConstructor;
 public class AccountService {
 
     /** Starting VP balance granted to every new guest. */
-    public static final long STARTING_VP = 10_000L;
+    public static final long STARTING_VP = 17_500L;
 
     /** Minimum length of a player-chosen display name. */
     public static final int DISPLAY_NAME_MIN_LENGTH = 3;

@@ -46,7 +46,7 @@ Response `200`:
 ```
 
 ### POST /api/v1/guest
-No auth. Creates a guest account + wallet with starting VP (10000).
+No auth. Creates a guest account + wallet with starting VP (17500).
 
 Request body is **required**, and carries the nickname the player already chose:
 
@@ -74,7 +74,7 @@ Response `201`:
   "displayName": "Cenk",
   "avatarId": "avatar_1",
   "status": "ACTIVE",
-  "vpBalance": 10000,
+  "vpBalance": 17500,
   "diamondBalance": 0
 }
 ```

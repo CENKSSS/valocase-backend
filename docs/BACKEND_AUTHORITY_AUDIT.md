@@ -373,7 +373,7 @@ Files:
 
 What is wrong or risky:
 
-`POST /api/v1/guest` creates a new account and grants `STARTING_VP = 10_000`. There is no rate limit, device limit, captcha, platform attestation, account binding, IP throttling, or abuse-state check in this backend.
+`POST /api/v1/guest` creates a new account and grants `STARTING_VP = 17_500`. There is no rate limit, device limit, captcha, platform attestation, account binding, IP throttling, or abuse-state check in this backend.
 
 Why it is amateur/temporary/client-trusting:
 
