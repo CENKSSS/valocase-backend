@@ -1,6 +1,7 @@
 package com.cenk.valocase.account.web;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -15,15 +16,18 @@ import com.cenk.valocase.account.dto.AccountProfileResponse;
 import com.cenk.valocase.account.dto.GuestRegisterRequest;
 import com.cenk.valocase.account.dto.GuestRegisterResponse;
 import com.cenk.valocase.account.dto.UpdateAvatarRequest;
+import com.cenk.valocase.account.dto.UpdateCountryRequest;
 import com.cenk.valocase.account.dto.UpdateDisplayNameRequest;
 import com.cenk.valocase.account.service.AccountService;
 import com.cenk.valocase.common.exception.ApiException;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @RestController
 @RequestMapping("/api/v1")
 @RequiredArgsConstructor
+@Slf4j
 public class AccountController {
 
     private final AccountService accountService;
@@ -34,13 +38,28 @@ public class AccountController {
      * persist and send back.
      *
      * <p>The nickname is required. A request without a usable one is rejected
-     * with 400 and creates nothing at all.
+     * with 400 and creates nothing at all. The country is required only once
+     * {@code valocase.registration.require-country-code} is switched on, which
+     * happens after the country-screen client release has replaced the one in
+     * the store.
+     *
+     * <p>Arrival is logged before anything else runs, so a request that is
+     * refused deeper in the stack can still be told apart from one that never
+     * arrived. Only the shape of the body is logged: the nickname is
+     * user-supplied content, so its length is recorded and its text is not.
+     * Whether a country was present is recorded rather than its value, because
+     * at this point it is still unvalidated client input.
      */
     @PostMapping("/guest")
     @ResponseStatus(HttpStatus.CREATED)
     public GuestRegisterResponse registerGuest(
             @RequestBody(required = false) GuestRegisterRequest request) {
-        return accountService.registerGuest(request == null ? null : request.displayName());
+        String displayName = request == null ? null : request.displayName();
+        String countryCode = request == null ? null : request.countryCode();
+        log.info("guest registration request received: bodyPresent={} displayNameLength={} countryPresent={}",
+                request != null, displayName == null ? -1 : displayName.length(),
+                countryCode != null && !countryCode.isBlank());
+        return accountService.registerGuest(displayName, countryCode);
     }
 
     /** Saves the player's chosen nickname as the account display name. */
@@ -53,6 +72,27 @@ public class AccountController {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Request body with displayName is required");
         }
         return accountService.updateDisplayName(account, request.displayName());
+    }
+
+    /**
+     * Changes the account's country from the Settings screen.
+     *
+     * <p>PATCH rather than PUT: it revises one field of the account and leaves
+     * the nickname, avatar and everything else untouched.
+     *
+     * <p>The account edited is the one the {@code X-Guest-Token} header resolves
+     * to. The body carries the country and nothing else — no account id is
+     * accepted, so there is no request shape that edits another player.
+     */
+    @PatchMapping("/account/country")
+    public AccountProfileResponse updateCountry(
+            @RequestHeader(value = "X-Guest-Token", required = false) String guestToken,
+            @RequestBody(required = false) UpdateCountryRequest request) {
+        Account account = accountService.requireAccountByToken(guestToken);
+        if (request == null) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Request body with countryCode is required");
+        }
+        return accountService.updateCountryCode(account, request.countryCode());
     }
 
     /** Saves the player's selected avatar on the account. */

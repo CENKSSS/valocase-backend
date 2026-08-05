@@ -51,7 +51,7 @@ class AccountRegistrationIT {
     void nicknameSuppliedAtRegistration_isTheAccountsNameFromBirth() {
         String name = uniqueName();
 
-        GuestRegisterResponse res = accountService.registerGuest(name);
+        GuestRegisterResponse res = accountService.registerGuest(name, "TR");
 
         assertEquals(name, res.displayName());
         // Read it back from the database, not just the response.
@@ -66,7 +66,7 @@ class AccountRegistrationIT {
     void surroundingWhitespaceIsTrimmed() {
         String name = uniqueName();
 
-        GuestRegisterResponse res = accountService.registerGuest("  " + name + "  ");
+        GuestRegisterResponse res = accountService.registerGuest("  " + name + "  ", "TR");
 
         assertEquals(name, res.displayName());
     }
@@ -81,7 +81,7 @@ class AccountRegistrationIT {
 
         for (String missing : new String[]{null, "", "   "}) {
             ApiException ex = assertThrows(ApiException.class,
-                    () -> accountService.registerGuest(missing));
+                    () -> accountService.registerGuest(missing, "TR"));
             assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
         }
 
@@ -92,7 +92,7 @@ class AccountRegistrationIT {
     @Test
     void noAccountEverGetsTheGeneratedPlaceholderNameAnymore() {
         String name = uniqueName();
-        GuestRegisterResponse res = accountService.registerGuest(name);
+        GuestRegisterResponse res = accountService.registerGuest(name, "TR");
 
         // "AgentXXXX" was the placeholder that marked an abandoned registration.
         // Nothing writes it at sign-up now, so it stops appearing entirely.
@@ -106,7 +106,8 @@ class AccountRegistrationIT {
         int accountsBefore = accountCount();
         int walletsBefore = walletCount();
 
-        ApiException ex = assertThrows(ApiException.class, () -> accountService.registerGuest("ab"));
+        ApiException ex = assertThrows(ApiException.class,
+                () -> accountService.registerGuest("ab", "TR"));
 
         assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
         assertEquals(accountsBefore, accountCount());
@@ -118,7 +119,8 @@ class AccountRegistrationIT {
         int accountsBefore = accountCount();
 
         ApiException ex = assertThrows(ApiException.class,
-                () -> accountService.registerGuest("A".repeat(AccountService.DISPLAY_NAME_MAX_LENGTH + 1)));
+                () -> accountService.registerGuest(
+                        "A".repeat(AccountService.DISPLAY_NAME_MAX_LENGTH + 1), "TR"));
 
         assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
         assertEquals(accountsBefore, accountCount());
@@ -128,12 +130,55 @@ class AccountRegistrationIT {
     void nicknameWithIllegalCharacters_isRejected_andWritesNothing() {
         int accountsBefore = accountCount();
 
-        for (String bad : new String[]{"ad soyad", "emoji😀", "nokta.li", "tire-li", "çğüşiö"}) {
+        // Whitespace, punctuation and emoji only. Letters are legal in every
+        // script now, so nothing here is rejected merely for not being ASCII.
+        for (String bad : new String[]{"ad soyad", "emoji😀", "nokta.li", "tire-li", "O'Connor"}) {
             ApiException ex = assertThrows(ApiException.class,
-                    () -> accountService.registerGuest(bad), "should have rejected: " + bad);
+                    () -> accountService.registerGuest(bad, "TR"), "should have rejected: " + bad);
             assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus(), bad);
         }
         assertEquals(accountsBefore, accountCount());
+    }
+
+    @Test
+    void unicodeNicknames_areStoredAndReadBackIntact() {
+        // The point of this one is the round trip through PostgreSQL, not the
+        // validator: a name that validates in Java is worthless if the column,
+        // the connection encoding or the driver mangles it on the way in.
+        for (String name : new String[]{"Çınar", "Yiğit", "محمد", "अर्जुन", "한국어", "Łukasz"}) {
+            GuestRegisterResponse res = accountService.registerGuest(name, "TR");
+
+            assertEquals(name, res.displayName(), name);
+            String stored = jdbc.queryForObject(
+                    "SELECT display_name FROM accounts WHERE id = ?::uuid", String.class, res.accountId());
+            assertEquals(name, stored, "round trip changed the name: " + name);
+        }
+    }
+
+    @Test
+    void aDecomposedNicknameIsStoredInItsComposedForm() {
+        // "Jose" + combining acute goes in; the NFC form must come out, and the
+        // database must hold that same form rather than the input.
+        GuestRegisterResponse res = accountService.registerGuest("José", "TR");
+
+        assertEquals("José", res.displayName());
+        String stored = jdbc.queryForObject(
+                "SELECT display_name FROM accounts WHERE id = ?::uuid", String.class, res.accountId());
+        assertEquals("José", stored);
+    }
+
+    @Test
+    void duplicateDisplayNames_areAllowed() {
+        String name = uniqueName();
+
+        GuestRegisterResponse first = accountService.registerGuest(name, "TR");
+        GuestRegisterResponse second = accountService.registerGuest(name, "TR");
+
+        assertEquals(name, first.displayName());
+        assertEquals(name, second.displayName());
+        Integer sharing = jdbc.queryForObject(
+                "SELECT COUNT(*) FROM accounts WHERE display_name = ?", Integer.class, name);
+        assertEquals(2, sharing);
     }
 
     @Test
@@ -141,11 +186,11 @@ class AccountRegistrationIT {
         // One shared validator, so a name that is legal at sign-up cannot be
         // illegal on a later rename, or the reverse.
         String legal = uniqueName();
-        GuestRegisterResponse res = accountService.registerGuest(legal);
+        GuestRegisterResponse res = accountService.registerGuest(legal, "TR");
         var account = jdbc.queryForObject(
                 "SELECT display_name FROM accounts WHERE id = ?::uuid", String.class, res.accountId());
         assertEquals(legal, account);
 
-        assertThrows(ApiException.class, () -> accountService.registerGuest("ab"));
+        assertThrows(ApiException.class, () -> accountService.registerGuest("ab", "TR"));
     }
 }

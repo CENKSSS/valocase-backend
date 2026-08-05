@@ -48,10 +48,11 @@ Response `200`:
 ### POST /api/v1/guest
 No auth. Creates a guest account + wallet with starting VP (17500).
 
-Request body is **required**, and carries the nickname the player already chose:
+Request body is **required**, and carries the nickname and country the player
+already chose:
 
 ```json
-{ "displayName": "Cenk" }
+{ "displayName": "Yiğit", "countryCode": "TR" }
 ```
 
 Register only after the player has confirmed a nickname. The requirement is the
@@ -66,21 +67,91 @@ here can never be illegal later:
 - 3–20 characters, surrounding whitespace trimmed
 - letters, digits and underscore only (`^[A-Za-z0-9_]+$`)
 
+`countryCode` rules:
+
+- ISO-3166-1 alpha-2 only, from the official 249-code set. `TR`, not `TUR`,
+  `Turkey` or `Türkiye`.
+- Accepted in any case and stored uppercase: `tr` is stored and returned as `TR`.
+- Two uppercase letters is not the rule — `ZZ`, `XX`, `XK`, `UK` and `EU` are all
+  rejected because they are not assigned codes.
+- **The backend never sends a country name.** The label the player reads
+  ("Türkiye - TR") is built client-side from the code, in the player's language.
+
+`countryCode` is **optional during the migration window** and becomes required
+when the backend property `valocase.registration.require-country-code` is turned
+on. See "Country rollout" below.
+
 Response `201`:
 ```json
 {
   "accountId": "f1c2...uuid",
   "guestToken": "a9b8...uuid",
-  "displayName": "Cenk",
+  "displayName": "Yiğit",
   "avatarId": "avatar_1",
+  "countryCode": "TR",
   "status": "ACTIVE",
   "vpBalance": 17500,
   "diamondBalance": 0
 }
 ```
 
-`400` when `displayName` is missing or breaks the rules above. Nothing is
-written: no account, no wallet, no starting balance.
+`countryCode` is `null` for an account created without one.
+
+`400` when `displayName` is missing or breaks the rules above, or when
+`countryCode` is present but is not an official code — that one is refused
+whether or not the country is required yet, because a client sending `Türkiye`
+is broken rather than old. Nothing is written: no account, no wallet, no
+starting balance.
+
+### PATCH /api/v1/account/country
+Auth required (`X-Guest-Token`). Changes the country from the Settings screen.
+
+```json
+{ "countryCode": "IN" }
+```
+
+Same validator and same normalisation as registration. The account changed is
+the one the token resolves to; there is no `accountId` field and one would be
+ignored. A rejected code leaves the stored country exactly as it was, including
+the `null` an account created before the country screen carries — this endpoint
+is how those players fill theirs in.
+
+Response `200`:
+```json
+{
+  "accountId": "f1c2...uuid",
+  "displayName": "Yiğit",
+  "countryCode": "IN"
+}
+```
+
+`400` when the code is missing, blank, or not an official ISO code. A blank does
+**not** clear the country: the picker cannot produce "no country", so a blank
+arriving here is a client bug rather than an instruction.
+
+### Country rollout
+
+The country is **self-reported and unverified**. It is what the player picked
+from a list — not derived from an IP address, not from the store locale, not
+from the SIM, and nothing checks it. A player can deliberately select a country
+they do not live in, and can change it at any time. Treat every country report
+as a stated preference. Verifying it would need a separate mechanism that does
+not exist today.
+
+Three phases, in this order:
+
+1. **Backend release (compatibility).** `countryCode` accepted and validated but
+   optional. The client already in the store keeps registering; its accounts get
+   `country_code = NULL`. Nothing is inferred to fill that gap.
+2. **Unity release.** The client ships the country screen and starts sending
+   `countryCode` on registration.
+3. **Activation.** Once the old client is drained, set
+   `REQUIRE_COUNTRY_CODE=true` (property
+   `valocase.registration.require-country-code`). A registration without a
+   country is then a `400`.
+
+Doing 3 before 2 is what takes sign-ups offline, so the property ships as
+`false` and is turned on deliberately.
 
 ### GET /api/v1/wallet
 Auth required (`X-Guest-Token`). Current VP balance.

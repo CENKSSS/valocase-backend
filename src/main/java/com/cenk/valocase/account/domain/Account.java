@@ -40,6 +40,20 @@ public class Account {
     @Column(name = "avatar_id", length = 50)
     private String avatarId;
 
+    /**
+     * The country the player selected, as an ISO-3166-1 alpha-2 code, uppercase.
+     *
+     * <p>Nullable, and that is a rollout state rather than a permanent one: every
+     * account created before the country screen shipped has no country, and no
+     * value is invented for those rows. It is never derived from an IP address.
+     *
+     * <p>Self-reported and unverified — see {@code docs/API_CONTRACT.md}. A
+     * player may pick a country they do not live in, and may change it later from
+     * Settings, so this is a preference, not a fact about where they are.
+     */
+    @Column(name = "country_code", length = 2)
+    private String countryCode;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 30, nullable = false)
     private AccountStatus status;

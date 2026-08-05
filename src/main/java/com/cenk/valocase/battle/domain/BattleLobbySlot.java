@@ -56,6 +56,14 @@ public class BattleLobbySlot {
     @Column(name = "avatar_id", length = 50)
     private String avatarId;
 
+    /**
+     * Occupant's self-selected country (uppercase ISO-3166-1 alpha-2), copied
+     * from the account at create/join like {@code displayName} and
+     * {@code avatarId}. Null for EMPTY/BOT slots and accounts without one.
+     */
+    @Column(name = "country_code", length = 2)
+    private String countryCode;
+
     @Column(name = "is_creator", nullable = false)
     private boolean creator;
 

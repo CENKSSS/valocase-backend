@@ -278,6 +278,7 @@ public class BattleLobbyService {
         creatorSlot.setAccountId(accountId);
         creatorSlot.setDisplayName(creator.getDisplayName());
         creatorSlot.setAvatarId(creator.getAvatarId());
+        creatorSlot.setCountryCode(creator.getCountryCode());
         creatorSlot.setCreator(true);
         creatorSlot.setChargedVp(entryCost);
         creatorSlot.setLastSeenAt(Instant.now());
@@ -518,6 +519,7 @@ public class BattleLobbyService {
         target.setAccountId(accountId);
         target.setDisplayName(joiner.getDisplayName());
         target.setAvatarId(joiner.getAvatarId());
+        target.setCountryCode(joiner.getCountryCode());
         target.setChargedVp(entryCost);
         target.setLastSeenAt(Instant.now());
         slotRepository.save(target);
@@ -555,6 +557,7 @@ public class BattleLobbyService {
         seat.setAccountId(null);
         seat.setDisplayName(null);
         seat.setAvatarId(null);
+        seat.setCountryCode(null);
         seat.setChargedVp(0L);
         seat.setLastSeenAt(null);
         slotRepository.save(seat);
@@ -587,6 +590,7 @@ public class BattleLobbyService {
         target.setAccountId(null);
         target.setDisplayName("Bot " + target.getSlotIndex());
         target.setAvatarId(AccountService.DEFAULT_AVATAR_ID);
+        target.setCountryCode(null);
         target.setChargedVp(0L);
         slotRepository.save(target);
 
@@ -872,6 +876,11 @@ public class BattleLobbyService {
         return AccountService.resolveAvatarId(slot.getAvatarId());
     }
 
+    /** Country shown to clients: real players only, null elsewhere — the client draws no label for null. */
+    private static String slotCountryCode(BattleLobbySlot slot) {
+        return slot.getSlotType() == SlotType.REAL ? slot.getCountryCode() : null;
+    }
+
     /**
      * How long this lobby may sit WAITING before it expires. Event lobbies get
      * the longer window; everything a player created gets the short one. Every
@@ -1028,7 +1037,8 @@ public class BattleLobbyService {
                     addBotAllowed,
                     connected,
                     totalVp,
-                    rounds
+                    rounds,
+                    slotCountryCode(slot)
             ));
             if (lobby.getWinnerSlotIndex() != null && lobby.getWinnerSlotIndex() == slot.getSlotIndex()) {
                 winnerDisplayName = slotDisplayName;
@@ -1049,6 +1059,7 @@ public class BattleLobbyService {
                 .orElse(null);
         String creatorDisplayName = creatorSlot != null ? slotDisplayName(creatorSlot) : null;
         String creatorAvatarId = creatorSlot != null ? slotAvatarId(creatorSlot) : null;
+        String creatorCountryCode = creatorSlot != null ? slotCountryCode(creatorSlot) : null;
 
         List<CaseSelectionResponse> caseSelections = buildCaseSelections(lobby, lobbyCases, caseById);
         CaseDefinition primaryCase = caseById.get(lobby.getCaseId());
@@ -1056,7 +1067,8 @@ public class BattleLobbyService {
         return new LobbyResponse(
                 lobby.getId().toString(),
                 lobby.getStatus().name(),
-                new LobbyCreatorResponse(lobby.getCreatorAccountId().toString(), creatorDisplayName, creatorAvatarId),
+                new LobbyCreatorResponse(lobby.getCreatorAccountId().toString(), creatorDisplayName, creatorAvatarId,
+                        creatorCountryCode),
                 lobby.getCaseId(),
                 primaryCase != null ? primaryCase.getDisplayName() : null,
                 caseSelections,

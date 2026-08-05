@@ -11,6 +11,10 @@ import java.util.List;
  * <p>{@code connected} reflects whether a real-player occupant has been seen
  * within the connection window (bots are always connected, empty slots never).
  * A real winner that is not connected at resolution receives no reward.
+ *
+ * <p>{@code countryCode} is the occupant's self-selected ISO-3166-1 alpha-2
+ * code (uppercase); null for bots, empty slots and players who never picked
+ * one — the client draws no flag label for null.
  */
 public record LobbySlotResponse(
         int slotIndex,
@@ -22,6 +26,7 @@ public record LobbySlotResponse(
         boolean addBotAllowed,
         boolean connected,
         Long totalVp,
-        List<RolledSkinResponse> rounds
+        List<RolledSkinResponse> rounds,
+        String countryCode
 ) {
 }

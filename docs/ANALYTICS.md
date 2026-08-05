@@ -68,6 +68,36 @@ diamond balance has no ledger (only VP does); diamond changes are out of scope.
   minutes played, whether they registered that day (added by V78)
 - `admin_daily_summary` - one row per day: how many players, how many of them
   new, total and average minutes (added by V78)
+- `admin_accounts_by_country` - total accounts per selected country, plus the
+  `UNKNOWN` bucket of accounts that have none (added by V80)
+- `admin_daily_new_accounts_by_country` - new accounts per country per Istanbul
+  day (added by V80)
+- `admin_sessions_by_country` - sessions and minutes per country per day, by the
+  account's selected country (added by V80)
+- `admin_onboarding_funnel_by_country` - the pre-account funnel split by country
+  (added by V80)
+- `admin_nickname_rejections_by_country` - which nickname rule blocks which
+  country (added by V80)
+
+### Country: what these numbers are, and are not
+
+`accounts.country_code` is **self-reported**. It is the ISO-3166-1 alpha-2 code
+the player picked from a list on the country screen. It is not derived from an
+IP address, not from the store locale, not from the SIM, and nothing verifies
+it. A player may deliberately pick a country they do not live in, and may change
+it later from Settings. Read every country figure as a stated preference.
+
+**Do not reconcile these against Google Ads (or any store) install reports by
+country.** The ad network reports the country its own attribution assigns; this
+column reports what the player tapped. There is no install-referrer, no
+attribution id and no supported mechanism anywhere in this schema that links an
+ad click to an account, so the two cannot be joined one-to-one and a difference
+between them is not a discrepancy to chase.
+
+`UNKNOWN` in these views means the country was never asked, not that it is
+unknown: accounts created before the country screen shipped, and any created
+during the migration window by a client that predates it. That bucket should
+shrink after the client release and settle at a floor rather than reaching zero.
 
 The two daily views group by **Istanbul** day, not UTC, and attribute a session
 entirely to the day it started — a session crossing midnight counts once, on its

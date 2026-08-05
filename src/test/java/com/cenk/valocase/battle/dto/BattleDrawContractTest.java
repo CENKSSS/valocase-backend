@@ -23,7 +23,7 @@ class BattleDrawContractTest {
     void lobbyResponse_exposesDrawFieldsUnderTheExactNamesUnityReads() {
         LobbyResponse response = new LobbyResponse(
                 "b-123", "COMPLETED",
-                new LobbyCreatorResponse("acc-1", "Cenk", "av_3"),
+                new LobbyCreatorResponse("acc-1", "Cenk", "av_3", "TR"),
                 "vandal_basic", "Basic Vandal Case", List.of(),
                 1, 500L, 2, 2, List.of(),
                 null, null, false, null,

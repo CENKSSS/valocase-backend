@@ -22,6 +22,7 @@ import com.cenk.valocase.analytics.domain.PlayerActivityEvent;
 import com.cenk.valocase.analytics.domain.PlayerSession;
 import com.cenk.valocase.analytics.repository.PlayerActivityEventRepository;
 import com.cenk.valocase.analytics.repository.PlayerSessionRepository;
+import com.cenk.valocase.common.diagnostics.DiagnosticCounters;
 
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
@@ -48,25 +49,39 @@ public class PlayerActivityService {
     private final PlayerActivityEventRepository eventRepository;
     private final TransactionTemplate transactionTemplate;
     private final AnalyticsProperties properties;
+    private final DiagnosticCounters diagnosticCounters;
 
     private final ConcurrentHashMap<UUID, Instant> lastTracked = new ConcurrentHashMap<>();
-    private final ThreadPoolExecutor executor = new ThreadPoolExecutor(
-            1, 1, 30, TimeUnit.SECONDS, new LinkedBlockingQueue<>(1000),
-            runnable -> {
-                Thread thread = new Thread(runnable, "player-activity-tracker");
-                thread.setDaemon(true);
-                return thread;
-            },
-            new ThreadPoolExecutor.DiscardPolicy());
+    private final ThreadPoolExecutor executor;
 
     public PlayerActivityService(PlayerSessionRepository sessionRepository,
                                  PlayerActivityEventRepository eventRepository,
                                  PlatformTransactionManager transactionManager,
-                                 AnalyticsProperties properties) {
+                                 AnalyticsProperties properties,
+                                 DiagnosticCounters diagnosticCounters) {
         this.sessionRepository = sessionRepository;
         this.eventRepository = eventRepository;
         this.transactionTemplate = new TransactionTemplate(transactionManager);
         this.properties = properties;
+        this.diagnosticCounters = diagnosticCounters;
+        // Built here rather than in a field initialiser so the rejection handler
+        // can reach the injected counters.
+        this.executor = new ThreadPoolExecutor(
+                1, 1, 30, TimeUnit.SECONDS, new LinkedBlockingQueue<>(1000),
+                runnable -> {
+                    Thread thread = new Thread(runnable, "player-activity-tracker");
+                    thread.setDaemon(true);
+                    return thread;
+                },
+                // Was DiscardPolicy, which dropped session writes in total silence.
+                // A dropped task means the account exists but never gets a
+                // player_sessions row, which is invisible in the daily views —
+                // so it has to be said out loud.
+                (runnable, rejectingExecutor) -> {
+                    diagnosticCounters.recordSessionTaskDiscarded();
+                    log.warn("session tracking task discarded: queueSize={} shutdown={}",
+                            rejectingExecutor.getQueue().size(), rejectingExecutor.isShutdown());
+                });
         this.executor.allowCoreThreadTimeOut(true);
     }
 
@@ -82,6 +97,7 @@ public class PlayerActivityService {
             return;
         }
         lastTracked.put(accountId, now);
+        log.debug("session tracking submitted for account {}", accountId);
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
@@ -116,14 +132,20 @@ public class PlayerActivityService {
     private void track(UUID accountId, Instant now) {
         try {
             transactionTemplate.executeWithoutResult(status -> upsertSession(accountId, now));
+            diagnosticCounters.recordSessionCreationSuccess();
+            log.debug("session tracking succeeded for account {}", accountId);
         } catch (DataIntegrityViolationException raced) {
             try {
                 transactionTemplate.executeWithoutResult(
                         status -> sessionRepository.touchOpenSession(accountId, now));
+                diagnosticCounters.recordSessionCreationSuccess();
+                log.debug("session tracking succeeded via fallback for account {}", accountId);
             } catch (Exception e) {
+                diagnosticCounters.recordSessionCreationFailed();
                 log.warn("Session tracking fallback failed for account {}", accountId, e);
             }
         } catch (Exception e) {
+            diagnosticCounters.recordSessionCreationFailed();
             log.warn("Session tracking failed for account {}", accountId, e);
         }
     }
