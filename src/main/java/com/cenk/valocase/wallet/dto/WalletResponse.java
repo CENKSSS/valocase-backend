@@ -14,6 +14,15 @@ public record WalletResponse(
         long vpBalance,
         long diamondBalance,
         Instant updatedAt,
-        ProgressionView progression
+        ProgressionView progression,
+        String latestVersion
 ) {
+    /**
+     * Internal reads have no notion of a client version; only the /wallet
+     * endpoint fills latestVersion, so existing callers keep this shape.
+     */
+    public WalletResponse(String accountId, long vpBalance, long diamondBalance,
+                          Instant updatedAt, ProgressionView progression) {
+        this(accountId, vpBalance, diamondBalance, updatedAt, progression, null);
+    }
 }

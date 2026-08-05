@@ -1,5 +1,6 @@
 package com.cenk.valocase.wallet.web;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -24,6 +25,14 @@ public class WalletController {
     private final ProgressionService progressionService;
 
     /**
+     * Newest build published to the store, e.g. "1.0.20". The Unity client
+     * compares this against its own version and shows the update notice when
+     * it is behind. Empty (the default) means the notice never appears.
+     */
+    @Value("${valocase.client.latest-version:}")
+    private String latestClientVersion;
+
+    /**
      * Returns the current VP balance and player progression for the guest
      * identified by the X-Guest-Token header. Called by the client on startup.
      */
@@ -35,6 +44,6 @@ public class WalletController {
         ProgressionView progression = progressionService.buildView(account);
         return new WalletResponse(
                 wallet.accountId(), wallet.vpBalance(), wallet.diamondBalance(),
-                wallet.updatedAt(), progression);
+                wallet.updatedAt(), progression, latestClientVersion);
     }
 }
