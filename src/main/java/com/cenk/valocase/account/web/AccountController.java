@@ -56,10 +56,13 @@ public class AccountController {
             @RequestBody(required = false) GuestRegisterRequest request) {
         String displayName = request == null ? null : request.displayName();
         String countryCode = request == null ? null : request.countryCode();
-        log.info("guest registration request received: bodyPresent={} displayNameLength={} countryPresent={}",
+        String installationId = request == null ? null : request.installationId();
+        log.info("guest registration request received: bodyPresent={} displayNameLength={} "
+                        + "countryPresent={} installationPresent={}",
                 request != null, displayName == null ? -1 : displayName.length(),
-                countryCode != null && !countryCode.isBlank());
-        return accountService.registerGuest(displayName, countryCode);
+                countryCode != null && !countryCode.isBlank(),
+                installationId != null && !installationId.isBlank());
+        return accountService.registerGuest(displayName, countryCode, installationId);
     }
 
     /** Saves the player's chosen nickname as the account display name. */

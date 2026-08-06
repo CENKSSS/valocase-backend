@@ -41,9 +41,15 @@ event, so these are server-side estimates and are flagged `is_estimated`):
   default 30s), so `last_activity_at` can lag real activity by up to ~1
   minute. Session tracking runs on a background thread after the request's
   transaction commits and never adds latency to or fails a gameplay request.
-- App version and platform are NOT sent by the current client; the nullable
-  `player_sessions.platform` / `app_version` columns stay empty until a
-  future client provides them.
+- App version and platform ARE sent, and have been since the first lifecycle
+  client. `player_sessions.app_version` / `platform` are populated on every
+  session a real client opens — production carries versions from `1.0.1`
+  (2026-07-13) through `1.0.21`. The rows where they are empty are the
+  zero-second `REPLACED` placeholders, not missing client data.
+
+  *This bullet previously claimed the opposite. It was wrong from the day V76
+  shipped, and is corrected here rather than quietly edited because it was read
+  as evidence during the 2026-08-05 install-funnel investigation.*
 
 ## Wallet transaction reasons (source of each VP change)
 
@@ -471,3 +477,202 @@ DELETE FROM flyway_schema_history WHERE version = '76';
 `PlayerSession` lifecycle fields, the `AccountService.resolveActiveAccount`
 method, the client-session guard in `PlayerActivityService`, and the new
 `valocase.analytics.heartbeat-*` / `timeout-scan-interval` properties.)
+
+---
+
+# Installation identity, durable telemetry and timezone-aware reporting
+
+Added by `V82__account_installation_id.sql` and
+`V83__timezone_aware_reporting.sql`, together with the Unity-side durable
+telemetry queue. Written after the 2026-08-05 investigation, in which Google Ads
+reported 43 installs and the backend could account for 3 app launches and 0
+registrations.
+
+## The canonical installation id
+
+There is exactly one per device, and everything reports the same one.
+
+- **Source:** `ClientIdentity.InstallationId` (Unity), a random `Guid` stored in
+  `PlayerPrefs["valocase_installation_id"]`.
+- **Lifecycle:** created on first read, persisted immediately, reused for the life
+  of the install. It survives app restarts and store updates. It is cleared only
+  when the OS clears the app data, which is also what a reinstall does â€” so a
+  reinstall legitimately produces a new id.
+- **Not derived from** an advertising id, a device id, an IMEI, a MAC address, or
+  anything else identifying a person or a handset. It is a random UUID, nothing
+  more.
+- **Never travels beside** a nickname, a guest token, or an authorization header.
+
+A second, independently generated id anywhere in the client would break every
+join below without failing a build or a play test. `InstallationLinkPayloadTests`
+pins this.
+
+## Installation to account
+
+Three tables carry the id. They answer different questions and all three are
+needed:
+
+| Table | Column | Type | Covers |
+|---|---|---|---|
+| `onboarding_events` | `installation_id` | `VARCHAR(64)` | Before an account exists |
+| `accounts` | `installation_id` | `UUID` | The moment of registration (V82) |
+| `player_sessions` | `installation_id` | `UUID` | Every authenticated session (V76) |
+
+`onboarding_events` is text because that endpoint is unauthenticated and must
+store whatever a broken client sends without failing the insert. The other two
+are `UUID`. Use the `admin_installation_journey` view rather than casting by
+hand â€” its guarded cast turns a non-UUID telemetry value into `NULL` instead of
+raising `22P02`.
+
+**`accounts.installation_id` is nullable and non-unique, permanently.**
+
+- *Nullable*: clients older than the release that sends it â€” `1.0.19` and
+  `1.0.21`, both live in the store â€” register exactly as before and leave it
+  null. Nothing is ever back-filled.
+- *Non-unique*: one installation legitimately registers several accounts.
+  Production contained such cases before the column existed (one installation
+  owns three accounts). A `UNIQUE` constraint would have refused those players.
+
+The value is analytics data. It never authenticates, never authorises, and is
+never returned to a client. A blank or unparseable value is dropped with a WARN
+and the account is created anyway â€” a measurement may never cost a registration.
+
+## Durable onboarding telemetry
+
+The queue used to live only in memory, so the one case the funnel existed to
+explain â€” a device that launches and dies â€” was the one case it could not record.
+
+- **Storage:** `Application.persistentDataPath/onboarding_queue.json`.
+- **Write:** temp file, then replace. A process killed mid-write leaves the
+  previous queue intact rather than a truncated file that parses as zero events.
+- **Coalesced:** at most one write per second, plus an immediate write on
+  `OnApplicationPause`, `OnApplicationFocus(false)` and `OnApplicationQuit`. The
+  pause hook is the one that matters on mobile â€” a swiped-away app never reaches
+  `OnApplicationQuit`.
+- **Bounded:** 32 in memory, 64 on disk. When full the *oldest* are dropped: a
+  later funnel step implies the earlier ones happened.
+- **Flushed:** on the next launch, ahead of anything that launch emits.
+- **Corrupt file:** moved to `onboarding_queue.corrupt`, a warning is logged, and
+  the queue starts empty. It is never read again â€” a file that cannot parse,
+  retried every launch, would be a permanent error loop caused by telemetry.
+- **Contents:** only the declared `OnboardingEventRequest` fields. No nickname, no
+  guest token, no authorization header, no advertising id, no email, no IP. This
+  file sits in plain text in the app sandbox, which is why that restriction is
+  asserted by test rather than left to code review.
+
+### Retry and deduplication
+
+`eventId` is generated once, persisted with the event, and reused on every retry.
+The backend `uq_onboarding_events_event_id` unique index is the enforcement
+point, so a send that timed out after the server stored it does not double-count
+the step. Retries are bounded (4 attempts, doubling from 2s) and only transient
+failures are retried at all â€” a 400 or 404 is dropped, since resending an
+identical body cannot produce a different answer.
+
+### Error categories
+
+`registration_failed` carries `networkErrorCategory` and `httpStatus`, mapped by
+`BackendErrorMapper.NetworkCategory` onto the backend `NetworkErrorCategory`
+allowlist: `offline`, `timeout`, `dns`, `transport`, `http_error`,
+`invalid_response`, `unknown`. `httpStatus` is `0` when no HTTP response arrived.
+No URL, hostname, exception message, stack trace or response body is ever
+included. Nickname validation failures stay a separate vocabulary
+(`rejection_reason`, from `RegistrationRejectionReason`) â€” a transport failure and
+a refused nickname are different outcomes and must not share a bucket.
+
+This path was already implemented before V82/V83. The all-null columns in
+production were not a client gap: no registration failed in the window examined,
+so there was nothing to record.
+
+## Reporting timezone
+
+**Storage is UTC and does not change.** Every timestamp is `TIMESTAMPTZ`. Only the
+day boundary is a choice.
+
+The V78/V79/V80 views cut the day at `Europe/Istanbul` and **keep doing so**. They
+were not repointed: rewriting them would silently change every number already
+read, and would be just as wrong the day a third country is added.
+
+V83 adds functions taking the zone as an argument, validated against
+`pg_timezone_names` so a typo raises instead of producing a report for the wrong
+day:
+
+```sql
+SELECT * FROM admin_daily_summary_tz('Asia/Kolkata')    ORDER BY day DESC;
+SELECT * FROM admin_daily_summary_tz('Europe/Istanbul') ORDER BY day DESC;
+SELECT * FROM admin_daily_players_tz('Asia/Kolkata')    WHERE day = DATE '2026-08-05';
+SELECT * FROM admin_onboarding_funnel_tz('Asia/Kolkata') ORDER BY day DESC;
+```
+
+The `Europe/Istanbul` output of `admin_daily_players_tz` was verified row for row
+against the existing `admin_daily_players` view: 49 of 49 rows identical. The zone
+changes which day a session lands on and nothing else â€” for 2026-08-04 the
+Istanbul day shows 4 players and the Kolkata day 6.
+
+Do **not** derive the reporting zone from `accounts.country_code`. The country is
+self-reported, unverified, and null for most accounts; a report has to state which
+day it means rather than infer it per row.
+
+## Retention
+
+Nothing here deletes anything automatically and no scheduled cleanup job is
+added. `onboarding_events` grows by a handful of rows per install (the funnel is
+eleven steps long) and was 104 kB at 16 rows. When it needs trimming, the raw
+rows are the disposable part â€” every aggregate above is derivable from them:
+
+```sql
+-- Raw onboarding rows older than 60 days. Review the count before deleting.
+SELECT COUNT(*) FROM onboarding_events WHERE received_at < NOW() - INTERVAL '60 days';
+DELETE FROM onboarding_events        WHERE received_at < NOW() - INTERVAL '60 days';
+```
+
+## Known limitations
+
+These are properties of server-side evidence, not gaps to be closed later:
+
+- **The backend cannot prove an install that never launched.** A device that
+  downloads the app and never opens it produces no request of any kind. That
+  number exists only in Play Console.
+- **A Google Ads install is not a backend app launch.** They count different
+  events at different moments, attribution lags, and the two will never reconcile
+  exactly. Comparing them is an order-of-magnitude check, nothing finer.
+- **Anonymous endpoints leave no trace.** `/api/v1/health`, `/api/v1/skins`,
+  `/api/v1/cases`, `/api/v1/market/catalog` and `/api/v1/leaderboards` write
+  nothing anywhere. A device that launches, fetches the catalog and crashes is
+  invisible unless telemetry reached the server.
+- **Startup events stay best-effort until the first successful send.** The durable
+  queue narrows the window to a crash before the first disk write (under one
+  second), but cannot close it.
+- **Clients older than the durable-queue release keep the old behaviour.** Events
+  emitted by `1.0.19` and `1.0.21` and lost to a crash are gone; nothing
+  retroactive is possible.
+- **A registration refused before the install id is parsed is not correlated.**
+  Nickname and country rejections log a reason code but no installation, so a
+  refused registration cannot yet be joined to the funnel that led to it.
+
+## Rollback
+
+Both migrations are additive and reversible without data loss.
+
+```sql
+-- V83: reporting functions only. Nothing else references them.
+DROP FUNCTION IF EXISTS admin_onboarding_funnel_tz(TEXT);
+DROP FUNCTION IF EXISTS admin_daily_summary_tz(TEXT);
+DROP FUNCTION IF EXISTS admin_daily_players_tz(TEXT);
+DROP FUNCTION IF EXISTS admin_require_timezone(TEXT);
+DELETE FROM flyway_schema_history WHERE version = '83';
+
+-- V82: the view first, then the index, then the column.
+DROP VIEW  IF EXISTS admin_installation_journey;
+DROP INDEX IF EXISTS idx_accounts_installation_id;
+ALTER TABLE accounts DROP COLUMN IF EXISTS installation_id;
+DELETE FROM flyway_schema_history WHERE version = '82';
+```
+
+Reverting V82 also means removing `Account.installationId`, the `installationId`
+component of `GuestRegisterRequest`, the three-argument
+`AccountService.registerGuest` overload and `resolveInstallationId` â€” otherwise
+`ddl-auto=validate` refuses to start. Reverting the client queue means deleting
+`OnboardingTelemetryStore` and the persistence hooks in `OnboardingTelemetry`;
+the in-memory queue then works exactly as it did before.
+

@@ -54,6 +54,22 @@ public class Account {
     @Column(name = "country_code", length = 2)
     private String countryCode;
 
+    /**
+     * The install this account was registered from, as the client's own
+     * {@code ClientIdentity.InstallationId}.
+     *
+     * <p>Nullable and never back-filled. Clients older than the release that
+     * sends the field register exactly as before and leave this null; so does
+     * every account created before the column existed.
+     *
+     * <p>Not unique: one installation legitimately registers several accounts
+     * (cleared save data, a reinstall, a shared device), and production already
+     * contains such cases. Analytics only — nothing authenticates or authorises
+     * on this value, and it is never returned to a client.
+     */
+    @Column(name = "installation_id", updatable = false)
+    private UUID installationId;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "status", length = 30, nullable = false)
     private AccountStatus status;

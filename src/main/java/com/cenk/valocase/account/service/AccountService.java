@@ -100,6 +100,20 @@ public class AccountService {
      */
     @Transactional
     public GuestRegisterResponse registerGuest(String rawDisplayName, String rawCountryCode) {
+        return registerGuest(rawDisplayName, rawCountryCode, null);
+    }
+
+    /**
+     * Registration with the caller's install id, as sent by clients that carry
+     * the field. Behaviour is identical to the two-argument form in every
+     * respect other than the column written: the id is analytics data and no
+     * validation, rejection, ordering or response value depends on it.
+     *
+     * @param rawInstallationId the client's own per-install UUID, or null
+     */
+    @Transactional
+    public GuestRegisterResponse registerGuest(String rawDisplayName, String rawCountryCode,
+                                               String rawInstallationId) {
         diagnosticCounters.recordGuestRegistrationStarted();
         log.info("guest registration started");
 
@@ -111,6 +125,7 @@ public class AccountService {
             throw rejected;
         }
         String countryCode = requireAcceptableCountryCode(rawCountryCode);
+        UUID installationId = resolveInstallationId(rawInstallationId);
         Instant now = Instant.now();
 
         Account account = new Account();
@@ -118,6 +133,7 @@ public class AccountService {
         account.setDisplayName(displayName);
         account.setAvatarId(DEFAULT_AVATAR_ID);
         account.setCountryCode(countryCode);
+        account.setInstallationId(installationId);
         account.setStatus(AccountStatus.ACTIVE);
         account.setCreatedAt(now);
         account.setLastSeenAt(now);
@@ -131,8 +147,12 @@ public class AccountService {
         playerActivityService.recordActivity(account.getId());
 
         diagnosticCounters.recordGuestRegistrationSuccess();
-        log.info("guest registration created: accountId={} country={}",
-                account.getId(), account.getCountryCode());
+        // The install id is truncated in logs: eight hex characters are enough to
+        // correlate one registration with its telemetry while reading a log, and
+        // the full id stays in the database where it is actually joined.
+        log.info("guest registration created: accountId={} country={} installation={}",
+                account.getId(), account.getCountryCode(),
+                shortInstallation(account.getInstallationId()));
 
         return new GuestRegisterResponse(
                 account.getId().toString(),
@@ -220,6 +240,47 @@ public class AccountService {
             throw new ApiException(HttpStatus.BAD_REQUEST, INVALID_COUNTRY_MESSAGE);
         }
         return countryCode;
+    }
+
+    /**
+     * Parses the install id supplied at registration, or returns null.
+     *
+     * <p><strong>Never throws.</strong> This is the one validation in this class
+     * that cannot refuse a registration, and the asymmetry is deliberate. A
+     * nickname and a country are things the player chose and the game needs; the
+     * install id is a measurement. Failing a registration because an analytics
+     * field was malformed would trade a real player for a data point, so a value
+     * that will not parse is dropped, logged at WARN, and the account is created
+     * without it — exactly as it would be for a client too old to send one.
+     *
+     * <p>Blank and malformed are logged differently on purpose: blank is the
+     * normal shape of an older client and says nothing, while an unparseable
+     * value means a client is sending something we did not design for and is
+     * worth seeing in the log. The rejected text itself is never logged — it is
+     * unvalidated client input — only its length.
+     */
+    private UUID resolveInstallationId(String rawInstallationId) {
+        if (rawInstallationId == null || rawInstallationId.isBlank()) {
+            return null;
+        }
+        String trimmed = rawInstallationId.trim();
+        try {
+            return UUID.fromString(trimmed);
+        } catch (IllegalArgumentException malformed) {
+            log.warn("guest registration installationId dropped: malformed, length={}",
+                    trimmed.length());
+            return null;
+        }
+    }
+
+    /**
+     * The log-safe form of an install id: its first eight hex characters, or
+     * {@code none} when the client sent none. Short enough that a leaked log line
+     * cannot be joined back to a row on its own, long enough to follow one
+     * registration through a log file.
+     */
+    static String shortInstallation(UUID installationId) {
+        return installationId == null ? "none" : installationId.toString().substring(0, 8);
     }
 
     /**
