@@ -22,7 +22,7 @@ import java.util.Set;
  * together and a database test pins the constraint to this set.
  *
  * <p>Length is <em>not</em> the rule. "T1", "ZZ" and "XX" are all two uppercase
- * characters and all rejected, because membership of the official set is the
+ * characters and all rejected, because membership of the accepted set is the
  * rule and a shape check is only a cheap prefilter.
  */
 public final class CountryCodes {
@@ -31,12 +31,34 @@ public final class CountryCodes {
     public static final int CODE_LENGTH = 2;
 
     /**
+     * The code stored for a player who reached the country screen and did not
+     * choose: {@value}. It is a real stored value, not an absence.
+     *
+     * <p>{@code AA} rather than a made-up token because ISO-3166-1 reserves
+     * {@code AA} for private use and will never assign it to a country, so this
+     * can never collide with a real one. A non-alpha marker such as "00" would
+     * also have broken the two-uppercase-letters shape every column, constraint
+     * and client parser already relies on.
+     *
+     * <p>Keep this apart from {@code NULL} in reports. NULL means the player was
+     * never asked — every account created before the country screen existed, and
+     * every request from a client too old to send one. {@code AA} means they were
+     * asked and skipped. Collapsing the two loses the only signal that says
+     * whether the screen is working.
+     */
+    public static final String UNSPECIFIED = "AA";
+
+    /**
      * The 249 officially assigned ISO-3166-1 alpha-2 codes.
      *
      * <p>Deliberately absent: the user-assigned range ({@code XA}-{@code XZ},
      * {@code ZZ}, {@code AA}, {@code QM}-{@code QZ}), the unofficial {@code XK}
      * for Kosovo, the ccTLD-but-not-ISO {@code UK}, the exceptionally reserved
      * {@code EU}, and withdrawn codes such as {@code AN} and {@code CS}.
+     *
+     * <p>{@link #UNSPECIFIED} is one of those user-assigned codes and is absent
+     * here on purpose: it is added in {@link #ACCEPTED}, so this literal stays a
+     * faithful copy of the standard and the JDK drift check keeps working.
      */
     private static final Set<String> ISO_ALPHA_2 = Set.of(
             "AD", "AE", "AF", "AG", "AI", "AL", "AM", "AO", "AQ", "AR", "AS", "AT",
@@ -61,11 +83,33 @@ public final class CountryCodes {
             "TZ", "UA", "UG", "UM", "US", "UY", "UZ", "VA", "VC", "VE", "VG", "VI",
             "VN", "VU", "WF", "WS", "YE", "YT", "ZA", "ZM", "ZW");
 
+    /**
+     * What the API actually accepts: the official set plus {@link #UNSPECIFIED}.
+     *
+     * <p>Kept as a separate set from {@link #ISO_ALPHA_2} on purpose. The official
+     * literal has to stay a faithful copy of the standard so {@code CountryCodesTest}
+     * can keep comparing it to the JDK's table and catch a drifting JDK — folding
+     * {@code AA} into it would destroy the very invariant that test exists to
+     * protect. The SQL CHECK constraint mirrors <em>this</em> set.
+     */
+    private static final Set<String> ACCEPTED =
+            java.util.stream.Stream.concat(ISO_ALPHA_2.stream(), java.util.stream.Stream.of(UNSPECIFIED))
+                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
+
     private CountryCodes() {
     }
 
-    /** Every accepted code, uppercase. Immutable. */
+    /** Every accepted code, uppercase — the official set plus {@code AA}. Immutable. */
     public static Set<String> all() {
+        return ACCEPTED;
+    }
+
+    /**
+     * The 249 officially assigned ISO-3166-1 alpha-2 codes, without
+     * {@link #UNSPECIFIED}. Exposed so the drift check against the JDK's table has
+     * something faithful to compare.
+     */
+    public static Set<String> officialAlpha2() {
         return ISO_ALPHA_2;
     }
 
@@ -103,7 +147,7 @@ public final class CountryCodes {
      */
     public static String canonical(String raw) {
         String normalized = normalize(raw);
-        return normalized != null && ISO_ALPHA_2.contains(normalized) ? normalized : null;
+        return normalized != null && ACCEPTED.contains(normalized) ? normalized : null;
     }
 
     /** True when nothing was supplied: null, empty, or whitespace only. */

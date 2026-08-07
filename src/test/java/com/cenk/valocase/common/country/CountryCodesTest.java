@@ -54,7 +54,9 @@ class CountryCodesTest {
     void twoUppercaseLettersAreNotEnough() {
         // The point of an allowlist over a regex. Every one of these matches
         // ^[A-Z]{2}$ and none of them is a country.
-        for (String bad : new String[]{"ZZ", "XX", "XA", "QQ", "AA", "XK", "UK", "EU", "OO"}) {
+        // AA is absent from this list on purpose: it is the one user-assigned code
+        // this system does accept, as the "did not choose" marker.
+        for (String bad : new String[]{"ZZ", "XX", "XA", "QQ", "XK", "UK", "EU", "OO"}) {
             assertTrue(bad.matches("^[A-Z]{2}$"), bad);
             assertFalse(CountryCodes.isValid(bad), bad + " is not an assigned ISO-3166-1 code");
         }
@@ -95,9 +97,34 @@ class CountryCodesTest {
         // check that the frozen copy is still the right one: if a JDK upgrade
         // ever revises the standard's table, this fails and the Java literal and
         // the constraint get updated together, deliberately.
+        // Compared against the official subset, not all(): all() also carries the
+        // UNSPECIFIED marker, which is deliberately not an ISO country and would
+        // make this check fail for the wrong reason.
         Set<String> jdk = new TreeSet<>(Arrays.asList(Locale.getISOCountries()));
-        assertEquals(jdk, new TreeSet<>(CountryCodes.all()));
-        assertEquals(249, CountryCodes.all().size());
+        assertEquals(jdk, new TreeSet<>(CountryCodes.officialAlpha2()));
+        assertEquals(249, CountryCodes.officialAlpha2().size());
+    }
+
+    @Test
+    void theUnspecifiedMarkerIsAcceptedButIsNotAnIsoCountry() {
+        // A player who reached the country screen and skipped it stores AA. It has
+        // to pass validation like any other code, while staying out of the official
+        // list so country reports can tell a real country from a skip.
+        assertEquals("AA", CountryCodes.UNSPECIFIED);
+        assertTrue(CountryCodes.isValid("AA"));
+        assertEquals("AA", CountryCodes.canonical("aa"));
+        assertTrue(CountryCodes.all().contains("AA"));
+        assertFalse(CountryCodes.officialAlpha2().contains("AA"));
+        assertEquals(250, CountryCodes.all().size());
+    }
+
+    @Test
+    void skippingIsNotTheSameAsNeverBeingAsked() {
+        // AA is a stored value; blank is an absence. Registration treats them
+        // differently and nothing should blur the two.
+        assertFalse(CountryCodes.isBlank("AA"));
+        assertTrue(CountryCodes.isBlank(null));
+        assertNull(CountryCodes.canonical(null));
     }
 
     @Test
