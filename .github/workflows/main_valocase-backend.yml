@@ -27,11 +27,36 @@ jobs:
       - name: Build with Maven
         run: mvn clean package -DskipTests
 
+      - name: Select the executable Spring Boot JAR
+        # target/ holds both the repackaged fat JAR and the plain
+        # *.jar.original left behind by spring-boot-maven-plugin. Pick by
+        # manifest rather than by name: only the repackaged JAR has
+        # Start-Class. Staged as app.jar so the deploy step needs no wildcard.
+        run: |
+          set -eu
+          executable=""
+          for jar in target/*.jar; do
+            [ -f "$jar" ] || continue
+            manifest=$(unzip -p "$jar" META-INF/MANIFEST.MF 2>/dev/null || true)
+            case "$manifest" in
+              *Start-Class:*) executable="$jar"; break ;;
+            esac
+          done
+          if [ -z "$executable" ]; then
+            echo "::error::No executable Spring Boot JAR found under target/"
+            ls -l target/ || true
+            exit 1
+          fi
+          echo "Selected $executable"
+          mkdir -p staging
+          cp "$executable" staging/app.jar
+
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
           name: java-app
-          path: '${{ github.workspace }}/target/*.jar'
+          path: staging/app.jar
+          if-no-files-found: error
 
   deploy:
     runs-on: ubuntu-latest
@@ -45,6 +70,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: java-app
+
+      - name: Verify the downloaded JAR is executable
+        run: |
+          set -eu
+          ls -l app.jar
+          unzip -p app.jar META-INF/MANIFEST.MF | grep 'Start-Class:'
       
       - name: Login to Azure
         uses: azure/login@v2
@@ -59,5 +90,5 @@ jobs:
         with:
           app-name: 'valocase-backend'
           slot-name: 'Production'
-          package: '*.jar'
+          package: 'app.jar'
           
