@@ -2,6 +2,7 @@ package com.cenk.valocase.account.service;
 
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -117,12 +118,21 @@ public class AccountService {
         diagnosticCounters.recordGuestRegistrationStarted();
         log.info("guest registration started");
 
+        // A player who confirms the nickname screen without typing anything gets a
+        // name rather than a 400. Only BLANK is filled in: "ab" is a name the player
+        // chose and got wrong, so TOO_SHORT, TOO_LONG, WHITESPACE and
+        // INVALID_CHARACTER stay rejections and keep telling them what to fix.
         String displayName;
-        try {
-            displayName = requireValidDisplayName(rawDisplayName);
-        } catch (ApiException rejected) {
-            recordRejection(classifyDisplayName(rawDisplayName));
-            throw rejected;
+        if (classifyDisplayName(rawDisplayName) == RegistrationRejectionReason.BLANK) {
+            displayName = generateFallbackDisplayName();
+            log.info("guest registration: no nickname supplied, assigned a generated one");
+        } else {
+            try {
+                displayName = requireValidDisplayName(rawDisplayName);
+            } catch (ApiException rejected) {
+                recordRejection(classifyDisplayName(rawDisplayName));
+                throw rejected;
+            }
         }
         String countryCode = requireAcceptableCountryCode(rawCountryCode);
         UUID installationId = resolveInstallationId(rawInstallationId);
@@ -499,6 +509,25 @@ public class AccountService {
             return avatarId.trim();
         }
         return DEFAULT_AVATAR_ID;
+    }
+
+    /**
+     * Name given to a player who confirmed the nickname screen without typing one:
+     * {@code "Agent"} plus four random digits, e.g. {@code Agent4821}.
+     *
+     * <p>Random rather than derived from the account id, which Hibernate does not
+     * assign until the row is saved — the name has to exist before that. Collisions
+     * are harmless: display names have never been unique, there is no constraint on
+     * the column and nothing looks an account up by name.
+     *
+     * <p>Letters and digits only, so the generated name passes the very validator
+     * the player meets in Settings. A name the game hands out but refuses to accept
+     * when typed back would be a trap, and {@code #} is not in the allowed set.
+     *
+     * <p>Length is always 10 characters, inside {@link #DISPLAY_NAME_MAX_LENGTH}.
+     */
+    static String generateFallbackDisplayName() {
+        return "Agent" + ThreadLocalRandom.current().nextInt(1000, 10_000);
     }
 
     /** Default name for a fresh account: "Agent" + 4 stable chars from the account id. */

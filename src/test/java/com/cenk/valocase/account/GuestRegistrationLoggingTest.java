@@ -2,6 +2,7 @@ package com.cenk.valocase.account;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -132,12 +133,29 @@ class GuestRegistrationLoggingTest {
     }
 
     @Test
-    void blankIsLoggedAndCountedAsBlank() {
-        assertThrows(ApiException.class, () -> accountService.registerGuest(null, "TR"));
+    void blankGetsAGeneratedNameRatherThanARejection() {
+        // A player who confirms without typing is not making a mistake to report:
+        // they get a name and continue. BLANK therefore stops being a rejection,
+        // which is why nothing here counts one.
+        for (String blank : new String[]{null, "", "   "}) {
+            var response = accountService.registerGuest(blank, "TR");
 
-        assertTrue(logged("guest registration rejected: reason=BLANK"), messages().toString());
-        assertEquals(1L, counters.asMap().get("guest_registration_rejected"));
-        assertEquals(1L, counters.rejectionsByReason().get("BLANK"));
+            assertTrue(response.displayName().matches("Agent\\d{4}"),
+                    "[" + blank + "] -> " + response.displayName());
+        }
+
+        assertEquals(0L, counters.asMap().get("guest_registration_rejected"));
+        assertNull(counters.rejectionsByReason().get("BLANK"));
+        assertFalse(logged("reason=BLANK"), messages().toString());
+    }
+
+    @Test
+    void aGeneratedNameIsNeverLogged() {
+        // The generated name is still the player's name; the no-nickname path is
+        // logged without it, exactly as a typed name is.
+        var response = accountService.registerGuest(null, "TR");
+
+        assertFalse(logged(response.displayName()), messages().toString());
     }
 
     @Test
@@ -243,13 +261,13 @@ class GuestRegistrationLoggingTest {
     @Test
     void everyAttemptIsCountedAsStartedWhicheverWayItEnds() {
         accountService.registerGuest("Cenk", "TR");
-        assertThrows(ApiException.class, () -> accountService.registerGuest(null, "TR"));
-        assertThrows(ApiException.class, () -> accountService.registerGuest("ab", "TR"));
+        accountService.registerGuest(null, "TR");                                        // generated name
+        assertThrows(ApiException.class, () -> accountService.registerGuest("ab", "TR")); // TOO_SHORT
 
         // started = success + rejected, so a gap between them in production means
         // requests are dying somewhere other than validation.
         assertEquals(3L, counters.asMap().get("guest_registration_started"));
-        assertEquals(1L, counters.asMap().get("guest_registration_success"));
-        assertEquals(2L, counters.asMap().get("guest_registration_rejected"));
+        assertEquals(2L, counters.asMap().get("guest_registration_success"));
+        assertEquals(1L, counters.asMap().get("guest_registration_rejected"));
     }
 }
