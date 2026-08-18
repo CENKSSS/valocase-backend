@@ -53,8 +53,19 @@ public class AccountService {
      */
     static final int DISPLAY_NAME_MAX_CHARS = 60;
 
-    /** Default avatar for new accounts and the fallback for null/blank avatars. */
-    public static final String DEFAULT_AVATAR_ID = "avatar_1";
+    /**
+     * Default avatar for new accounts, the fallback for null/blank avatars, and the
+     * face bots wear in battles.
+     *
+     * <p>"Chamber", not a made-up id: this is the client's own first list entry — the
+     * one its setup panel auto-selects — so the stored default and what the player is
+     * already looking at agree from the moment the account exists. The old value,
+     * "avatar_1", named no client asset at all; it was meant to be overwritten by the
+     * avatar PUT that follows registration, but players who close the app in that gap
+     * kept the placeholder forever, and every OTHER client that then rendered them
+     * (leaderboards, battles) received an id it cannot map to a sprite.
+     */
+    public static final String DEFAULT_AVATAR_ID = "Chamber";
     /** Maximum length of an avatar id. */
     public static final int AVATAR_ID_MAX_LENGTH = 50;
 
